@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress note 工作畫面原型</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-insert" viewBox="0 0 16 16"><path d="M13 3v4.5a2 2 0 0 1-2 2H4M6.5 6.5 3.5 9.5l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-left" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-right" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-down" viewBox="0 0 16 16"><path d="M3.5 6 8 10.5 12.5 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-split" viewBox="0 0 16 16"><path d="M2.5 3.5h11v9h-11zM2.5 7.5h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+</svg>
+
+<header class="bar">
+  <div class="bar-bed">
+    <button class="bar-nav" type="button" data-say="原型只有這一位病人的資料" aria-label="上一床"><svg class="ic"><use href="#i-left"/></svg></button>
+    <strong id="pBed"></strong>
+    <button class="bar-nav" type="button" data-say="原型只有這一位病人的資料" aria-label="下一床"><svg class="ic"><use href="#i-right"/></svg></button>
+    <span class="bar-seq" id="pSeq"></span>
+  </div>
+  <div class="bar-id" id="pId"></div>
+  <dl class="bar-facts" id="pFacts"></dl>
+  <div class="bar-tools">
+    <span class="bar-demo">假資料原型</span>
+    <div class="seg" role="group" aria-label="時間軸範圍">
+      <button type="button" data-range="24">24 小時</button>
+      <button type="button" data-range="72" aria-pressed="true">3 天</button>
+      <button type="button" data-range="168">7 天</button>
+    </div>
+    <button class="bar-btn" type="button" id="btnCompact" aria-pressed="false"><svg class="ic"><use href="#i-rows"/></svg><span>精簡時間軸</span></button>
+  </div>
+</header>
+
+<section class="tl" aria-label="生命徵象、I/O、抗生素與培養的共同時間軸">
+  <div class="tl-legend" id="tlLegend"></div>
+  <div class="tl-plot" id="tlPlot">
+    <svg id="tlSvg" role="img" aria-label="時間軸圖"></svg>
+    <div class="tl-read" id="tlRead" hidden></div>
+  </div>
+</section>
+
+<main class="work">
+  <section class="editor" aria-label="Note 編輯區">
+    <div class="ed-head">
+      <input class="ed-title" id="noteTitle" value="Weekly/ Progress note" aria-label="Note 標題">
+      <nav class="ed-jump" aria-label="跳到段落">
+        <button type="button" data-jump="===Diagnosis===">Diagnosis</button>
+        <button type="button" data-jump="===Course===">Course</button>
+        <button type="button" data-jump="[Event]">Event</button>
+        <button type="button" data-jump="[V/S]">V/S</button>
+        <button type="button" data-jump="[Lab]">Lab</button>
+        <button type="button" data-jump="[Abx]">Abx</button>
+        <button type="button" data-jump="===Plan===">Plan</button>
+      </nav>
+      <button class="btn" type="button" id="btnPrev" aria-pressed="false"><svg class="ic"><use href="#i-split"/></svg>對照上一篇</button>
+    </div>
+    <div class="ed-prev" id="edPrev" hidden>
+      <p class="ed-prev-h">上一篇 · 2026/11/14 08:20 存檔 · 有底色的行今天已經改掉</p>
+      <pre id="prevBody" tabindex="0"></pre>
+    </div>
+    <textarea id="note" spellcheck="false" aria-label="Note 內容"></textarea>
+    <div class="ed-foot">
+      <span class="ed-status" id="status" role="status" aria-live="polite">游標所在的位置就是插入點</span>
+      <span class="ed-count" id="count"></span>
+      <button class="btn btn-primary" type="button" id="btnSave">暫存</button>
+    </div>
+  </section>
+
+  <div class="ref">
+    <div class="col" id="col1" tabindex="-1"></div>
+    <div class="col" id="col2" tabindex="-1"></div>
+    <div class="col" id="col3" tabindex="-1"></div>
+  </div>
+</main>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

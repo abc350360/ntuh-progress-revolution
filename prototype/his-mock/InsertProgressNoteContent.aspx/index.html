@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>病程紀錄-測試○○(F,1964/03/31,62y7m) 0000000 入: 2026/11/04 床: T0-08A -12-01 等:健保 住院中</title>
+<style>
+  /* 模擬 HIS 病程頁的骨架（尺寸照 2026-11-15 實測），只用來在院外測試工作畫面腳本。全部是假資料。 */
+  body { margin: 8px; background: #ffffe0; font: 13px "Trebuchet MS", Tahoma, sans-serif; }
+  table { border-collapse: collapse; }
+  #UpperBannerInfoTable { width: 100%; }
+  #Table1 td { border: 1px solid #36c; padding: 6px; font-size: 16px; font-weight: bold; }
+  #tblMenuList td { border: 1px solid #555; padding: 6px; }
+  #tblMenuList input, .fake input[type=button] { font-size: 12px; margin-right: 3px; }
+  #tblProgressNote { width: 100%; margin-top: 18px; }
+  #tblProgressNote > tbody > tr > td { vertical-align: top; background: #dfe7e6; }
+  #recordcontent { width: 236px; } #datacontent { width: 180px; }
+  .hdr { background: #4d5f8a; color: #fff; height: 30px; text-align: center; }
+  textarea { font: 14px Consolas, monospace; }
+  .demo { position: fixed; left: 8px; bottom: 6px; background: #f4d58a; color: #3d2a00; padding: 2px 8px; border-radius: 3px; font-weight: bold; z-index: 5; }
+.hdr2 { background:#3d5a8a; color:#fff; font-weight:bold; padding:2px 4px; }
+</style>
+</head>
+<body>
+<span class="demo">模擬 HIS 頁面 · 假資料</span>
+<form id="form1" onsubmit="return false">
+<table id="UpperBannerInfoTable"><tr><td>
+<div id="NTUHWeb1"><div id="maskarea">
+  <table id="Table1" style="width:100%"><tr><td>測試○○(F,1964/03/31,62y7m) 0000000 入: 2026/11/04 床: T0-08A -12-01 住院中</td></tr></table>
+  <table id="tblMenuList" style="width:100%"><tr><td class="fake"><input type="button" value="新增Progress"><input type="button" value="新增Weekly"><input type="button" value="新增Note" id="NTUHWeb1_btnInsertBlankNote"></td></tr></table>
+  <table id="tblProgressNote"><tr>
+    <td id="recordtitle" style="width:187px"><div class="hdr">時間　類別</div></td><td id="edittitle" style="width:668px"><div class="hdr">編輯區</div></td><td id="datatitle" style="width:134px"><div class="hdr">Data</div></td>
+  </tr><tr>
+    <td id="recordcontent"><div class="hdr"></div><div style="padding:8px">（note 清單）<br><br>11-15 Progress note<br>11-14 Progress note<br>11-13 WeeklySummary</div></td>
+    <td id="editcontent"><div class="hdr"></div>
+      <table id="tblNoteMainTab" style="width:803px"><tr><td>
+        <div id="NTUHWeb1_PnlBlankNote" style="width:793px"><div style="width:793px"><table style="width:793px">
+          <tr><td style="padding:6px 0">日期 2026 / 11 / 15　10 : 37</td></tr>
+          <tr><td><textarea id="NTUHWeb1_BlankNoteMainTab_txbBlankTitle" rows="1" style="width:794px;height:22px">Weekly/ Progress note</textarea></td></tr>
+          <tr><td><div id="BlankContentArea" style="width:789px"><textarea id="NTUHWeb1_BlankNoteMainTab_txbBlankContnt" rows="25" style="width:794px;height:406px"></textarea></div></td></tr>
+          <tr><td class="fake" style="padding:8px 0"><input type="button" value="暫存" id="NTUHWeb1_BlankNoteMainTab_btnSaveBlankNote" onclick="alert('模擬頁面不會存檔')"> <input type="button" value="拼字檢查"></td></tr>
+        </table></div></div>
+        <!-- 模擬 HIS 的結構化 Progress note（網址加 &kind=progress）：欄位 id 與順序照 2026-11-15 從 HIS 讀到的 -->
+        <div id="NTUHWeb1_PnlProgressNoteMainTab" style="display:none;width:460px"><table style="width:460px">
+          <tr><td colspan="2" style="padding:4px 0">西元 2026 年 11 月 15 日 10 時 37 分</td></tr>
+          <tr><td class="hdr2">Subjective</td><td class="hdr2">Objective</td></tr>
+          <tr><td><textarea id="NTUHWeb1_ProgressNoteMainTab_txbSubject" style="width:222px;height:90px">Afebrile, still lethargic</textarea></td><td><textarea id="NTUHWeb1_ProgressNoteMainTab_txbObject" style="width:222px;height:90px"></textarea></td></tr>
+          <tr><td colspan="2" class="hdr2">Assessment of Catheterization</td></tr>
+          <tr><td colspan="2"><textarea id="NTUHWeb1_ProgressNoteMainTab_txbBSIBundle" style="width:452px;height:50px"></textarea></td></tr>
+          <tr><td colspan="2" class="hdr2">Problem Assessment Plan <input type="button" value="新增PAP"></td></tr>
+          <tr><td colspan="2"><div style="background:#8fb0d8;padding:6px">
+            <textarea id="NTUHWeb1_ProgressNoteMainTab_ucPAP_txbProblem1" style="width:436px;height:50px">[Active]
+#. Pneumonia, suspected MRSA and PsA related</textarea>
+            <div>Assessment</div>
+            <textarea id="NTUHWeb1_ProgressNoteMainTab_ucPAP_txbAssessment1" style="width:436px;height:120px">[lab]
+WBC 2.83>3.69
+CRP 5.04>8.87
+
+[c/s note]11/2
+mostly due to poor intake</textarea>
+            <div>Plan</div>
+            <textarea id="NTUHWeb1_ProgressNoteMainTab_ucPAP_txbPlan1" style="width:436px;height:80px">- monitor vital signs</textarea>
+          </div></td></tr>
+        </table></div>
+      </td></tr></table>
+    </td>
+    <td id="datacontent"><div class="hdr">Data</div><div style="padding:8px;line-height:1.9">生命徵象<br>留置導管<br>檢驗<br>影核醫<br>抗生素</div></td>
+  </tr></table>
+</div></div>
+</td></tr></table>
+</form>
+
+<script>
+document.getElementById('NTUHWeb1_BlankNoteMainTab_txbBlankContnt').value = `===Diagnosis===
+[Active]
+#. Pneumonia with right pleural effusion, on Mepem and Ocillina
+#. Acute kidney injury on chronic kidney disease stage 3
+
+===Assessment===
+[Event]
+
+[V/S]
+T: 37.2 °C P: 88 bpm R: 18 /min
+BP: 116/62 mmHg
+體重:63.9>63.2(11/13)
+[Lab]
+#. Hemogram
+       WBC   Seg  Hb   Plt
+11/12  15.2  85   9.1  205
+11/13  13.9  82   8.8  212
+#. Renal & e-
+       BUN  CRE  Na   K
+11/12  49   1.9  133  3.9
+11/13  46   1.7  135  3.6
+#. Culture:
+[11/10] Pleural: S. aureus
+[11/10] U/C: P. mirabilis
+[CXR]
+2026/11/12: Increased RLL consolidation
+[Abx]
+Supecef 11/10-11/14
+
+===Plan===
+. Keep Mepem and Ocillina, follow up blood culture`;
+if (/[?&]kind=progress/.test(location.search)) {
+  document.getElementById('NTUHWeb1_PnlBlankNote').style.display = 'none';   // 真的 HIS 也是：文字框還在，只是面板沒顯示
+  document.getElementById('NTUHWeb1_PnlProgressNoteMainTab').style.display = '';
+}
+if (/[?&]kind=none/.test(location.search)) document.getElementById('NTUHWeb1_PnlBlankNote').style.display = 'none';
+</script>
+<script>Date.now = function () { return new Date(); };  // 真的 HIS 有舊版 date.js，Date.now() 回傳的是 Date 物件；模擬頁照做才抓得到這類錯</script>
+<script src="/dist/pn-workspace.console.js"></script>
+<script>
+// 等腳本啟動、各來源都失敗（這裡沒有 HIS）之後，塞進假資料重畫
+(function fill() {
+  const w = window.__pnw;
+  if (!w || w.M.loading.size) { setTimeout(fill, 150); return; }
+  const M = w.M, H = 3600e3, DAY = 24 * H, now = (+new Date());
+  const d0 = new Date(now).setHours(0, 0, 0, 0);
+  const md = (k) => { const d = new Date(d0 + k * DAY); return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); };
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const vitals = [];
+  for (let t = now - 7 * DAY; t < now; t += 4 * H + Math.round(rnd() * H)) {
+    const v = { t, temp: +(36.6 + rnd() * 0.8 + (rnd() > 0.85 ? 1.3 : 0)).toFixed(1), hr: Math.round(80 + rnd() * 40), rr: Math.round(16 + rnd() * 6) };
+    if (rnd() > 0.35) { v.sys = Math.round(105 + rnd() * 30); v.dia = Math.round(58 + rnd() * 18); }
+    if (rnd() > 0.3) { v.spo2 = Math.round(91 + rnd() * 8); v.o2 = '40%,10L'; }
+    vitals.push(v);
+  }
+  const keys = [md(-5) + ' 12:29', md(-4) + ' 14:29', md(-3) + ' 08:07', md(-2) + ' 17:38', md(0) + ' 05:40'];
+  const it = (name, unit, ref, vals, lv) => ({ name, unit, ref, vals, level: lv.split('').map((c) => ({ h: 'high', l: 'low', n: 'normal', '-': null }[c])) });
+  const sensA = ['Clindamycin', 'Ceftaroline', 'Daptomycin', 'Erythromycin', 'Oxacillin', 'Vancomycin', 'Linezolid', 'TMP/SMX'].map((d, i) => ({ code: d.slice(0, 2).toUpperCase(), drug: d, sir: i === 3 ? 'R' : 'S', mic: i === 3 ? '>=8' : '<=0.5', note: '' }));
+  const sensB = ['Amikacin', 'Ceftazidime', 'Ciprofloxacin', 'Cefepime', 'Meropenem', 'Piperacillin/tazobactam', 'Ceftriaxone'].map((d, i) => ({ code: d.slice(0, 2).toUpperCase(), drug: d, sir: i === 6 ? 'R' : i === 2 ? 'I' : 'S', mic: '<=1', note: '' }));
+  Object.assign(M, {
+    now, err: {}, loading: new Set(),
+    notes: [{ ms: d0 + 10.6 * H, title: 'Progress note', type: 'progress' }, { ms: d0 - DAY + 14.3 * H, title: 'Progress note', type: 'progress' }, { ms: d0 - 2 * DAY + 19.8 * H, title: 'WeeklySummary', type: 'weekly' }],
+    base: d0 - DAY + 14.3 * H,
+    vitals, weights: [{ ms: d0 - 5 * DAY + 23 * H, kg: 63.9 }, { ms: d0 - 2 * DAY + 14 * H, kg: 63.2 }, { ms: d0 + 6 * H, kg: 62.4 }],
+    io: { days: [-6, -5, -4, -3, -2, -1, 0].map((k) => { const i = k === 0 ? 420 : Math.round(900 + rnd() * 1500), o = k === 0 ? 250 : Math.round(800 + rnd() * 1600); return { ms: d0 + k * DAY, in: i, out: o, net: i - o, shifts: {}, partial: k === 0 }; }),
+      items: [{ name: 'Meropenem Trihydrate (Mepem 500 mg/vial)', kind: 'in', vals: [0, 0, 0, 0, 0, 300, 100] }, { name: '管灌', kind: 'in', vals: [900, 950, 800, 950, 900, 1000, 120] }, { name: '尿液', kind: 'out', vals: [1500, 900, 1400, 1300, 1500, 1700, 200] }, { name: '左胸pig-tail', kind: 'out', vals: [120, 80, 150, 100, 90, 60, 20] }, { name: 'NG減壓', kind: 'out', vals: [0, 0, 0, 0, 0, 150, 30] }] },
+    abx: [{ name: 'Mepem', generic: 'Meropenem Trihydrate', dose: '1000 mg IV Q12H', start: d0 - DAY, end: null }, { name: 'Ocillina', generic: 'Oxacillin Sodium', dose: '2000 mg IV Q4H', start: d0 - 2 * DAY, end: null }, { name: 'Supecef', generic: 'Cefepime HCl', dose: '2000 mg IV Q12H', start: d0 - 5 * DAY, end: d0 - DAY }],
+    meds: { today: [{ id: '1', name: 'Musco 30 mg/tab', generic: 'Ambroxol', dose: '1 tab', route: 'PO', freq: 'TID', start: d0 - 9 * DAY, end: null, atc: ['R05CB06'] }, { id: '2', name: 'Aldactone 25 mg/tab', generic: '', dose: '1 tab', route: 'PO', freq: 'BID', start: d0 - DAY + 16 * H, end: null, atc: ['C03DA01'] }, { id: '3', name: 'Paracetamol 1000 mg/100 mL /vial', generic: '', dose: '500 mg', route: 'IF', freq: 'Q6HPRN', start: d0 - 4 * DAY, end: null, atc: ['N02BE01'] }],
+      given: [{ ms: d0 - DAY + 19 * H, id: '3', name: 'Paracetamol 1000 mg/100 mL /vial', dose: '500mg', freq: 'Q6HPRN', route: 'IF' }, { ms: d0 + 1 * H, id: '3', name: 'Paracetamol 1000 mg/100 mL /vial', dose: '500mg', freq: 'Q6HPRN', route: 'IF' }] },
+    orders: { items: [{ ms: d0 - DAY + 15.7 * H, type: '處方', act: '新增', name: 'Amino Acid 7%, Glucose 7.5%, Electrolyte【(PPN) Bfluid】1000 mL IF QD', end: '' }, { ms: d0 + 9.3 * H, type: '處方', act: '刪除', name: 'Albumin【AlbuRx 25 12.5 g/50 mL】25 g IF QD', end: '' }, { ms: d0 + 9 * H, type: '檢驗', act: '新增', name: 'CBC', end: '' }], rows: [] },
+    labs: { summary: {
+      text: `#. Hemogram\n       WBC   Seg   Hb   Plt  CRP\n${md(-3)}  15.2  85    9.1  205  12.6\n${md(-2)}  13.9  82    8.8  212  -\n${md(0)}  12.8  79.6  8.9  230  8.4\n#. Liver\n       ALT\n${md(0)}  20\n#. Renal\n       BUN  CRE  eGFR\n${md(-2)}  46   1.7  32\n${md(0)}  41   1.6  34\n#. Electrolytes\n       Na   K\n${md(-2)}  135  3.6\n${md(0)}  137  3.3\n#. Culture:\n[${md(-2)}] Sputum: Achromobacter species; S. aureus`,
+      blood: { dates: keys, items: [
+        it('WBC', 'K/μL', '3.25~9.16', ['11.2', '16.8', '15.2', '13.9', '12.8'], 'hhhhh'), it('Seg', '%', '41.6~74.4', ['78', '88', '85', '82', '79.6'], 'hhhhh'),
+        it('Hb', 'g/dL', '11.0~15.2', ['9.4', '9.2', '9.1', '8.8', '8.9'], 'lllll'), it('Plt', 'K/μL', '150~378', ['198', '186', '205', '212', '230'], 'nnnnn'),
+        it('CRP', 'mg/dL', '<1.0', ['3.2', '14.1', '12.6', '', '8.4'], 'hhh-h'), it('BUN', 'mg/dL', '7~25', ['38', '44', '49', '46', '41'], 'hhhhh'),
+        it('CRE', 'mg/dL', '0.6-1.3', ['1.7', '1.9', '1.9', '1.7', '1.6'], 'hhhhh'), it('eGFR', 'mL/min/1.73 m^2', '', ['32', '28', '28', '32', '34'], '-----'),
+        it('Na', 'mmol/L', '136~145', ['136', '134', '133', '135', '137'], 'nllln'), it('K', 'mmol/L', '3.5~5.1', ['4.4', '4.1', '3.9', '3.6', '3.3'], 'nnnnl'),
+        it('ALT', 'U/L', '7~41', ['24', '', '22', '', '20'], 'n-n-n'), it('NT-proBNP', 'pg/mL', '<125', ['', '4820', '', '', '3950'], '-h--h')] },
+      special: { 'V gas': { dates: [keys[3], keys[4]], items: [it('pH', '', '7.35~7.45', ['7.31', '7.38'], 'ln'), it('LA', 'mmol/L', '0.5~2.2', ['2.6', '1.4'], 'hn')] } },
+      groups: [['Hemogram', ['WBC', 'Hb', 'Plt', 'CRP', 'PCT']], ['Liver', ['ALT', 'AST']], ['Renal', ['BUN', 'CRE', 'eGFR']], ['Electrolytes', ['Na', 'K']], ['Cardiac', ['NT-proBNP']]], others: [], attach: { WBC: 'Seg', CRE: 'eGFR' } } },
+    micro: [
+      { no: 'A1', spec: 'SPUTUM (EXPECTORATED)', t: d0 - 2 * DAY + 17.7 * H, reported: d0 - DAY + 14.7 * H, stain: ['Gram (-) rods 2+'], orgs: [{ item: 'ID+DS Sputum Culture #1', name: 'Achromobacter species 2+', mark: '' }, { item: 'ID+DS Sputum Culture #2', name: 'Staphylococcus aureus 1+', mark: '' }], neg: [], prelim: true, sens: [] },
+      { no: 'A2', spec: 'Pleural effusion', t: d0 - 5 * DAY + 17.4 * H, reported: d0 - 3 * DAY + 9.7 * H, stain: [], orgs: [{ item: 'ID+DS Common #1', name: 'Staphylococcus aureus 2+', mark: '' }], neg: [], prelim: false, sens: [{ item: 'ID+DS Common #1', org: 'Staphylococcus aureus 2+', list: sensA }] },
+      { no: 'A3', spec: 'RANDOM URINE Voided urine', t: d0 - 5 * DAY + 15.8 * H, reported: d0 - 3 * DAY + 8.9 * H, stain: [], orgs: [{ item: 'ID+DS Urine #1', name: 'Proteus mirabilis >100,000', mark: '' }], neg: [], prelim: false, sens: [{ item: 'ID+DS Urine #1', org: 'Proteus mirabilis >100,000', list: sensB }] },
+      { no: 'A4', spec: 'STOOL', t: d0 - 4 * DAY + 14.5 * H, reported: d0 - 2 * DAY + 10 * H, stain: [], orgs: [], neg: ['No Vibrio & Aeromonas'], prelim: false, sens: [] }],
+    pending: [{ t: d0 - DAY + 14.2 * H, spec: 'BLOOD', no: 'B1', items: [{ name: 'Blood Culture', spec: '', state: '' }] }, { t: d0 - DAY + 17 * H, spec: 'RUBBER DRAIN', no: 'B2', items: [{ name: 'Anaerobic', spec: '', state: '' }, { name: 'ID+DS Common', spec: '', state: '' }] }, { t: d0 + 5.6 * H, spec: 'BLOOD', no: 'B3', items: [{ name: 'Procalcitonin', spec: '', state: '' }] }],
+    pacs: [{ ms: d0, title: 'Chest CT without contrast', body: 'Findings: loculated right pleural effusion with pigtail in situ.', imp: 'Loculated right pleural effusion with pigtail in situ.' }, { ms: d0 - 3 * DAY, title: 'Chest : AP View (Supine)', body: 'Supine AP chest radiograph shows:\n- Increased RLL consolidation.\n- Small right pleural effusion.', imp: 'Increased RLL consolidation. Small right pleural effusion.' }],
+    nursing: [{ ms: d0 + 3.5 * H, text: '發燒｜陸續監測體溫，冰枕使用' }, { ms: d0 - DAY + 22.75 * H, text: '待追蹤事件｜班內偶呼吸費力、血氧濃度不穩定' }],
+    tubes: [{ name: '鼻胃管(Nasal-gastric tube)', since: d0 - 10 * DAY }, { name: '豬尾巴(Pig-tail)', since: d0 - 38 * DAY }],
+    handoff: '1. 11/14 夜間發燒 38.4，已抽 B/C x2\n2. 右側 pigtail 引流量少，注意固定\n3. 家屬希望主治說明病情',
+  });
+  M.err = {};
+  w.render();
+})();
+</script>
+</body>
+</html>

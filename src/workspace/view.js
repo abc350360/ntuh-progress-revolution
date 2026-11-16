@@ -28,11 +28,12 @@ const PNW_VIEW = (() => {
     <label class="dim" for="baseSel">上一篇</label><select id="baseSel" title="「自上一篇以來」要從哪一篇 note 算起"></select>
     <div class="seg" role="group" aria-label="時間軸範圍"><button type="button" data-range="24">24h</button><button type="button" data-range="72" aria-pressed="true">3 天</button><button type="button" data-range="168">7 天</button><button type="button" data-range="custom" title="自己指定時間軸要看幾天">自訂</button></div>
     <label class="range-n" id="rangeBox" hidden><input type="number" id="rangeDays" min="1" max="60" step="1" value="14" aria-label="時間軸天數"> 天</label>
-    <button class="bar-btn" type="button" id="btnCompact" aria-pressed="false" title="只留體溫、抗生素、培養">${icon('rows')}精簡</button>
+    <button class="bar-btn" type="button" id="btnCompact" aria-pressed="false" title="精簡：時間軸只留體溫、抗生素、培養">${icon('rows')}<span class="t">精簡</span></button>
+    <button class="bar-btn primary" type="button" id="btnFill" title="一鍵帶入：把 V/S、上一篇之後的新 Lab、影像、培養與病原檢驗、管路放進這篇 note 對應的地方。只填空的地方、只加不刪；V/S 那一段如果全是舊數值會換成新的。不會存檔。">${icon('insert')}帶入</button>
     <span class="status" id="status" role="status" aria-live="polite"></span>
-    <button class="bar-btn" type="button" id="btnList" aria-pressed="false" title="顯示或隱藏 HIS 左邊的 note 清單">${icon('list')}清單</button>
-    <button class="bar-btn" type="button" id="btnReload" title="重新抓這位病人的資料">${icon('reload')}重抓</button>
-    <button class="bar-btn" type="button" id="btnHide" title="收起工作畫面，回到 HIS 原本的版面">${icon('close')}收起</button>
+    <button class="bar-btn" type="button" id="btnList" aria-pressed="false" title="清單：顯示或隱藏 HIS 左邊的 note 清單">${icon('list')}<span class="t">清單</span></button>
+    <button class="bar-btn" type="button" id="btnReload" title="重抓：重新抓這位病人的資料">${icon('reload')}<span class="t">重抓</span></button>
+    <button class="bar-btn" type="button" id="btnHide" title="收起：收起工作畫面，回到 HIS 原本的版面">${icon('close')}<span class="t">收起</span></button>
   </div>
   <section class="tl" aria-label="生命徵象、I/O、抗生素與培養的共同時間軸">
     <div class="tl-legend" id="tlLegend"></div>
@@ -85,7 +86,7 @@ const PNW_VIEW = (() => {
     let sayTimer = 0;
     function say(msg, kind) {
       const el = $('#status');
-      el.textContent = msg; el.className = 'status' + (kind ? ' ' + kind : '');
+      el.textContent = msg; el.title = msg; el.className = 'status' + (kind ? ' ' + kind : '');
       clearTimeout(sayTimer);
       if (kind) sayTimer = setTimeout(() => { el.className = 'status'; }, 4000);
     }
@@ -184,6 +185,8 @@ const PNW_VIEW = (() => {
     // 最接近某個時間、而且有這個欄位的那一筆（一小時內）；點時間軸選取時間點時用
     const nearField = (k, at) => { let b; for (const v of M.vitals || []) if (v[k] != null && Math.abs(v.t - at) <= H && (!b || Math.abs(v.t - at) < Math.abs(b.t - at))) b = v; return b; };
     let geo = null;
+    let curVs = null;   // 目前「插入 V/S」會給的文字（最後一筆，或在時間軸上選的時間點）
+    const tubeLine = (l) => `${l.name.replace(/[（(].*$/, '').trim() || l.name}${fin(l.since) ? ` since ${md(l.since)} (D${dayNo(l.since)})` : ''}`;
     function drawTimeline() {
       const L = lanes();
       const ROWS = [{ id: 't', h: 44 }, { id: 'hr', h: 26 }, { id: 'bp', h: 28 }, { id: 'sp', h: 22 }, { id: 'io', h: 38 }, { id: 'wt', h: 22 }, { id: 'abx', h: Math.max(1, L.length) * 17 + 6 }, { id: 'cx', h: 24 }];
@@ -343,6 +346,7 @@ const PNW_VIEW = (() => {
         if (tr.length) lines.push(`體重:${tr.map((r) => r.kg.toFixed(1)).join('>')}(${+md(tr[tr.length - 1].ms).split('/')[0]}/${+md(tr[tr.length - 1].ms).split('/')[1]})`);
         return lines.join('\n');
       };
+      curVs = { text: vsText, when: PIN != null ? `${md(PIN)} ${hm(PIN)} ` : '最後一筆' };
       const dash = '<span class="s">—</span>';
       const html = {
         t: `<span class="n">體溫</span>${lt ? `<span class="v ${lt.temp >= 38 ? 'hi' : ''}">${lt.temp.toFixed(1)}</span><span class="s">${PIN != null ? `${md(lt.t)} ${hm(lt.t)}` : tR ? 'Tmax ' + tR[1].toFixed(1) : hm(lt.t)}</span>` : dash}${insBtn(vsText, PIN != null ? `[V/S] ${md(PIN)} ${hm(PIN)} 的數值` : '[V/S] 最後一筆與體重趨勢')}`,
@@ -394,7 +398,7 @@ const PNW_VIEW = (() => {
         rows.push(`<li class="row"><span class="tag rep">報告</span><span class="main">${esc(c.short)} ${md(c.t)}：${c.e.orgs.length ? `<span class="org">${esc(c.e.orgs.map((o) => orgAbbr(o.name)).join('、'))}</span>` : esc(c.e.neg[0])}</span><span class="sub">${md(c.e.reported)} ${hm(c.e.reported)}</span><button class="ib" type="button" data-focus="cx-${c.id}" title="看這份培養" aria-label="看這份培養">${icon('rows')}</button></li>`);
       }
       for (const p of (M.pacs || []).filter((p) => p.ms >= dayStart(B))) {
-        rows.push(`<li class="row"><span class="tag rep">影像</span><span class="main">${esc(p.title)}</span><span class="sub">${md(p.ms)}</span>${insBtn(`[${imgKind(p.title)}] ${new Date(p.ms).getFullYear()}/${md(p.ms)}: ${p.imp.slice(0, 400)}`, p.title)}</li>`);
+        rows.push(`<li class="row"><span class="tag rep">影像</span><span class="main">${esc(p.title)}</span><span class="sub">${md(p.ms)}</span>${insBtn(`<${md(p.ms)}> ${p.title}: ${p.imp.slice(0, 600)}`, p.title)}</li>`);
       }
       h += secOpen('since', '自上一篇以來', `<span class="meta">${fin(M.base) ? `${md(B)} ${hm(B)} 之後` : '找不到上一篇，先用近 24 小時'} · ${rows.length} 項</span>`);
       h += stateNote('orders', '醫囑變更') + stateNote('meds', '給藥紀錄');
@@ -458,7 +462,7 @@ const PNW_VIEW = (() => {
       // 管路
       const tubes = M.tubes || [];
       h += `${secOpen('tubes', '管路', `<span class="meta">${tubes.length} 條</span>`)}${stateNote('tubes', '管路')}<ul>`;
-      h += tubes.map((l) => `<li class="row"><span class="tag">${fin(l.since) ? 'D' + dayNo(l.since) : '?'}</span><span class="main">${esc(l.name)}</span><span class="sub">${fin(l.since) ? md(l.since) + ' 起' : ''}</span>${insBtn(`${l.name.replace(/[（(].*$/, '').trim() || l.name}${fin(l.since) ? ` since ${md(l.since)} (D${dayNo(l.since)})` : ''}`, l.name)}</li>`).join('');
+      h += tubes.map((l) => `<li class="row"><span class="tag">${fin(l.since) ? 'D' + dayNo(l.since) : '?'}</span><span class="main">${esc(l.name)}</span><span class="sub">${fin(l.since) ? md(l.since) + ' 起' : ''}</span>${insBtn(tubeLine(l), l.name)}</li>`).join('');
       h += '</ul>' + secClose;
       $('#col1').innerHTML = h;
     }
@@ -466,13 +470,13 @@ const PNW_VIEW = (() => {
     /* ---------- 第二欄：Lab ---------- */
     const COLW = 50, DELTAW = 46, INSW = 26;
     let LM = null;
-    const fmtGroup = (g, idxs) => {
+    const fmtGroup = (g, idxs, model) => {
       const rows = g.rows.filter((r) => !labHide.has(r.k) && idxs.some((i) => r.cells[i]));
       const dates = idxs.filter((i) => rows.some((r) => r.cells[i]));
       if (!rows.length || !dates.length) return '';
       const cw = rows.map((r) => Math.max(r.k.length, ...dates.map((i) => (r.cells[i] ? r.cells[i].v.length : 1))));
       const line = (label, get) => (label.padEnd(5) + rows.map((r, k) => '  ' + get(r).padEnd(cw[k])).join('')).replace(/\s+$/, '');
-      return [`#. ${g.name}`, line('', (r) => r.k), ...dates.map((i) => line(LM.cols[i].d, (r) => (r.cells[i] ? r.cells[i].v : '-')))].join('\n');
+      return [`#. ${g.name}`, line('', (r) => r.k), ...dates.map((i) => line((model || LM).cols[i].d, (r) => (r.cells[i] ? r.cells[i].v : '-')))].join('\n');
     };
     function renderCol2() {
       // 一欄 COLW 寬：算出放得下幾個抽血日（3–8 個）
@@ -558,15 +562,15 @@ const PNW_VIEW = (() => {
       const quiet = C.filter((c) => c.status === 'ng' && !c.pend.length);
       const label = (c) => esc(c.short);
       const cxNote = (c) => {
-        const day = `${+md(c.t).split('/')[0]}/${+md(c.t).split('/')[1]}`;
-        if (!c.e || (!c.e.orgs.length && !c.e.neg.length)) return `[${day}] ${c.short}: pending`;
-        if (!c.e.orgs.length) return `[${day}] ${c.short}: -`;
+        const day = md(c.t);
+        if (!c.e || (!c.e.orgs.length && !c.e.neg.length)) return `<${day}> ${c.short}: pending`;
+        if (!c.e.orgs.length) return `<${day}> ${c.short}: -`;
         const sens = c.e.sens.map((s) => { const pick = (k) => s.list.filter((x) => x.sir === k).map((x) => x.drug); return `  ${orgAbbr(s.org)}: S ${pick('S').join(', ') || '-'}; R ${pick('R').join(', ') || '-'}`; });
-        return [`[${day}] ${c.short}: ${c.e.orgs.map((o) => orgAbbr(o.name) + (o.mark ? ' (' + o.mark + ')' : '')).join('; ')}${c.pend.length || c.e.prelim ? ' (preliminary)' : ''}`, ...sens].join('\n');
+        return [`<${day}> ${c.short}: ${c.e.orgs.map((o) => orgAbbr(o.name) + (o.mark ? ' (' + o.mark + ')' : '')).join('; ')}${c.pend.length || c.e.prelim ? ' (preliminary)' : ''}`, ...sens].join('\n');
       };
       const ISO = isolates();
       const live = (M.abx || []).filter((a) => a.end == null);
-      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length ? insBtn(() => C.filter((c) => c.t > now() - 7 * DAY).sort((a, b) => a.t - b.t).map(cxNote).join('\n'), '#. Culture 近 7 天', 'Culture') : ''}`);
+      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length ? insBtn(() => C.filter((c) => c.t > now() - 7 * DAY).sort((a, b) => a.t - b.t).map(cxNote).join('\n'), '[Pathogen] 近 7 天的培養', 'Pathogen') : ''}`);
       h += stateNote('labs', '培養報告') + stateNote('pending', '未發送檢驗進度');
       if (live.length && ISO.length) {
         h += '<div class="cover">';
@@ -632,7 +636,7 @@ const PNW_VIEW = (() => {
 
       const pacs = (M.pacs || []).slice(0, 10);
       h += `${secOpen('pacs', '影像報告', `<span class="meta">${pacs.filter((p) => p.ms >= dayStart(B)).length} 份新的 · 點一列看全文</span>`)}${stateNote('pacs', '影像報告')}`;
-      h += pacs.map((r, i) => `<div class="rep"><div class="row"><span class="tag ${r.ms >= dayStart(B) ? 'rep' : ''}">${imgKind(r.title)}</span><button class="toggle" type="button" aria-expanded="false" data-rep="${i}"><span class="sub">${md(r.ms)}</span><span class="imp" title="${esc(r.title)}">${esc(r.imp.slice(0, 140) || r.title)}</span></button>${insBtn(`[${imgKind(r.title)}] ${new Date(r.ms).getFullYear()}/${md(r.ms)}: ${r.imp.slice(0, 600)}`, `${imgKind(r.title)} ${md(r.ms)}`)}</div><div class="full" hidden><b>${esc(r.title)}</b>\n${esc(r.body)}</div></div>`).join('');
+      h += pacs.map((r, i) => `<div class="rep"><div class="row"><span class="tag ${r.ms >= dayStart(B) ? 'rep' : ''}">${imgKind(r.title)}</span><button class="toggle" type="button" aria-expanded="false" data-rep="${i}"><span class="sub">${md(r.ms)}</span><span class="imp" title="${esc(r.title)}">${esc(r.imp.slice(0, 140) || r.title)}</span></button>${insBtn(`<${md(r.ms)}> ${r.title}: ${r.imp.slice(0, 600)}`, `${imgKind(r.title)} ${md(r.ms)}`)}</div><div class="full" hidden><b>${esc(r.title)}</b>\n${esc(r.body)}</div></div>`).join('');
       h += secClose;
 
       const nur = (M.nursing || []).filter((n) => n.ms > B).slice(0, 40);
@@ -679,12 +683,13 @@ const PNW_VIEW = (() => {
     /* ---------- 事件 ---------- */
     const dock = $('#dock');
     // 按插入鈕時不要把焦點從 HIS 的文字框搶走，游標才留在原位
-    dock.addEventListener('mousedown', (e) => { if (e.target.closest('.ib, #btnLabMerge')) e.preventDefault(); });
+    dock.addEventListener('mousedown', (e) => { if (e.target.closest('.ib, #btnLabMerge, #btnFill')) e.preventDefault(); });
     dock.addEventListener('click', (e) => {
       const t = e.target;
       const b = t.closest('[data-ins]');
       if (b) { const it = INS[+b.dataset.ins]; if (it) hooks.insert(typeof it.text === 'function' ? it.text() : it.text, it.label); return; }
       if (t.closest('#btnLabMerge')) { hooks.labMerge(); return; }
+      if (t.closest('#btnFill')) { hooks.fillAll(); return; }
       const fo = t.closest('[data-focus]'); if (fo) { focusRow(fo.dataset.focus); return; }
       const rg = t.closest('[data-range]');
       if (rg) {
@@ -798,7 +803,16 @@ const PNW_VIEW = (() => {
     new ResizeObserver(() => drawTimeline()).observe(plot);
 
     const debug = () => ({ geo: geo && { W: geo.W, t0: geo.t0, t1: geo.t1 }, ui: { ...ui }, now: now(), nowType: typeof M.now, base: base(), H, DAY, lanes: lanes().map((a) => [a.start, a.end]), plotW: $('#tlPlot').clientWidth });
-    return { debug, render, say, drawTimeline, labText: () => (M.labs && M.labs.summary ? M.labs.summary.text : ''), setHidden: (v) => { dock.hidden = v; $('#btnReopen').hidden = !v; }, setListPressed: (v) => $('#btnList').setAttribute('aria-pressed', String(v)) };
+    // 一鍵帶入用：上一篇之後的新抽血日，整理成 note 的表格文字（不受目前翻到哪一頁影響）
+    function labNewText() {
+      const page = ui.labPage; ui.labPage = 0;
+      let m; try { m = labModel(8); } finally { ui.labPage = page; }
+      if (!m || !m.newIdx.length) return { text: '', days: '' };
+      return { text: m.groups.map((g) => fmtGroup(g, m.newIdx, m)).filter(Boolean).join('\n'), days: m.newIdx.map((i) => m.cols[i].d).join('、') };
+    }
+    const vsOut = () => (curVs ? { text: curVs.text(), when: curVs.when } : { text: '', when: '' });
+    const tubesOut = () => { const t = M.tubes || []; return { text: t.map(tubeLine).join('\n'), n: t.length }; };
+    return { debug, render, say, drawTimeline, labNewText, vsText: vsOut, tubesText: tubesOut, labText: () => (M.labs && M.labs.summary ? M.labs.summary.text : ''), setHidden: (v) => { dock.hidden = v; $('#btnReopen').hidden = !v; }, setListPressed: (v) => $('#btnList').setAttribute('aria-pressed', String(v)) };
   }
   return { create, SHELL };
 })();

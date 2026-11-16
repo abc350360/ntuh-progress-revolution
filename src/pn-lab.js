@@ -1,4 +1,6 @@
 // 檢驗整理（表格＋緊湊）輸出的後處理：合併 Renal & e-、去 eGFR/Glucose、只留上一篇 note 之後的新列、標 pending。
+// 輸出的寫法（使用者 2026-11-16）：培養與病原檢驗放 [Pathogen] 段、影像放 [Image] 段，都不在 [Lab] 底下；
+// 這兩段一筆一行，日期寫 <MM/DD>（方括號留給段落標題）。輸入（檢驗整理）仍是「#. Culture:」＋[MM/DD]。
 const PNLab = (() => {
   const DROP_COLS = new Set(['eGFR', 'Glucose']);
   const COL_GAP = 2, MAX_COLS = 8, EMPTY = '-';
@@ -100,7 +102,7 @@ const PNLab = (() => {
     [/\bPT\b|Prothrombin/i, 'Coagulation', ['PT', 'INR']], [/a\.?P\.?T\.?T/i, 'Coagulation', ['aPTT']],
     [/NT-?pro/i, 'Cardiac', ['NT-proBNP']], [/CK-MB/i, 'Cardiac', ['CK-MB']], [/\bCK\b/, 'Cardiac', ['CK']], [/Troponin/i, 'Cardiac', ['TnT']],
   ];
-  const cultureType = (s) => (/blood|\bB\/C|^B2/i.test(s) ? 'B/C' : /urine|\bU\/C|^B3/i.test(s) ? 'U/C' : /sputum|\bSpu?\/C|\bS\/C/i.test(s) ? 'Spu/C'
+  const cultureType = (s) => (/influenza/i.test(s) ? 'Influenza A+B' : /sars-cov|covid/i.test(s) ? 'SARS-CoV-2' : /blood|\bB\/C|^B2/i.test(s) ? 'B/C' : /urine|\bU\/C|^B3/i.test(s) ? 'U/C' : /sputum|\bSpu?\/C|\bS\/C/i.test(s) ? 'Spu/C'
     : /cvc|cvp|picc|catheter tip|Cath/i.test(s) ? 'Tip/C' : /wound|pus|W\/C/i.test(s) ? 'W/C' : /stool/i.test(s) ? 'Stool/C' : 'Cul');
 
   // labText：檢驗整理表格＋緊湊輸出；note：上一篇 note；orderRows：醫囑簽收（全部）；pacsAll：已出報告影像
@@ -131,7 +133,7 @@ const PNLab = (() => {
     const culEntries = [];
     if (cul) for (const l of cul.lines) { const m = l.match(/^\[(\d{1,2})\/(\d{1,2})\]\s*(.+?):\s*(.*)$/); if (m) culEntries.push({ day: +m[1] * 100 + +m[2], md: `${m[1]}/${m[2]}`, label: m[3], type: cultureType(m[3]), res: m[4], line: l }); }
     const newCul = culEntries.filter((e) => e.day > cutoff || notePending.has(e.day + '|' + e.type));
-    // pending：醫囑有開、報告還沒出；抽血依項目放回各檢驗類別，培養放 Culture，影像放 Image
+    // pending：醫囑有開、報告還沒出；抽血依項目放回各檢驗類別，培養與病原檢驗放 [Pathogen]，影像放 [Image]
     const labPend = new Map();   // group → Map(day → { md, cols:Set, names:Set })
     const addLabPend = (grp, o, cols, name) => {
       if (!labPend.has(grp)) labPend.set(grp, new Map());
@@ -140,7 +142,10 @@ const PNLab = (() => {
     };
     const culPend = [], imgPend = [];
     const seen = new Set();
-    const norm = (s) => String(s).replace(/\[[^\]]*\]/g, '').replace(/\(V\d+\)/g, '').replace(/特殊醫囑.*$/, '').replace(/\(Specimen.*$/, '').replace(/\s+/g, '').toLowerCase();
+    // 醫囑名稱後面常帶「(Indication:…小部位:…)」「(入院檢查)」，報告標題沒有；比對前先拿掉
+    const norm = (s) => String(s).replace(/\[[^\]]*\]/g, '').replace(/\(V\d+\)/g, '').replace(/特殊醫囑.*$/, '').replace(/\(Specimen.*$/, '').replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
+    // 同一項檢查：名稱相同，或其中一邊是另一邊的開頭（醫囑名稱比報告標題多了附註時）
+    const sameExam = (a, b) => a === b || (a.length >= 6 && b.length >= 6 && (a.startsWith(b) || b.startsWith(a)));
     const delKeys = new Set((orderRows || []).filter((o) => /刪除/.test(o.act)).map((o) => o.startDay + '|' + norm(o.name)));
     for (const o of orderRows || []) {
       if (/刪除/.test(o.act) || !o.startDay || o.startDay > todayNum || delKeys.has(o.startDay + '|' + norm(o.name))) continue;
@@ -148,12 +153,12 @@ const PNLab = (() => {
       if (/影醫/.test(o.type)) {
         if (!/新增/.test(o.act)) continue;
         const key = 'img|' + o.startDay + '|' + norm(o.name); if (seen.has(key)) continue; seen.add(key);
-        const done = (pacsAll || []).some((p) => norm(p.title) === norm(o.name) && p.day >= o.startDay - 1 && p.day <= o.startDay + 3);
-        if (!done) imgPend.push(`[${o.startMd}] ${o.name.replace(/\[[^\]]*\]/g, '').replace(/特殊醫囑.*$/, '').trim()}: pending`);
-      } else if (/檢驗/.test(o.type) && /culture|ID\+DS|培養|Gram|AFS|Fungus/i.test(o.name)) {
+        const done = (pacsAll || []).some((p) => sameExam(norm(p.title), norm(o.name)) && p.day >= o.startDay - 1 && p.day <= o.startDay + 3);
+        if (!done) imgPend.push({ day: o.startDay, md: o.startMd, title: o.name.replace(/\[[^\]]*\]/g, '').replace(/特殊醫囑.*$/, '').replace(/\s*\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').trim() });
+      } else if (/檢驗/.test(o.type) && /culture|ID\+DS|培養|Gram|AFS|Fungus|Influenza|SARS-CoV/i.test(o.name)) {
         const type = cultureType(o.name);
         const key = 'cul|' + o.startDay + '|' + type; if (seen.has(key)) continue; seen.add(key);
-        if (!culEntries.some((e) => e.day === o.startDay && e.type === type)) culPend.push({ day: o.startDay, line: `[${o.startMd}] ${type}: pending` });
+        if (!culEntries.some((e) => e.day === o.startDay && e.type === type)) culPend.push({ day: o.startDay, md: o.startMd, label: type, res: 'pending' });
       } else if (/檢驗/.test(o.type) && !/ABO|Rh blood|Antibody|Blood Type|備血|cross/i.test(o.name) && (o.startDay > cutoff || o.startDay === todayNum)) {
         if (/Urinalysis|\bU\/A\b|Specimen:\s*URI|urine/i.test(o.name)) { addLabPend('Urine', o, [], ''); continue; }
         const hits = LAB_MAP.filter(([re]) => re.test(o.name));
@@ -187,10 +192,15 @@ const PNLab = (() => {
       const t = buildTable(name, cols, rows);
       if (t || whole.length) out.push((t || `#. ${name}`) + (whole.length ? '\n' + whole.join('\n') : ''));
     }
-    const culLines = [...newCul.map((e) => ({ day: e.day, line: e.line })), ...culPend].sort((a, b) => a.day - b.day).map((e) => e.line);
-    if (culLines.length) out.push('#. Culture:\n' + culLines.join('\n'));
-    if (imgPend.length) out.push('#. Image:\n' + imgPend.join('\n'));
-    return { text: out.join('\n') || '（上一篇之後沒有新的檢驗結果）', cutoff };
+    const pad = (md) => String(md).split('/').map((x) => x.padStart(2, '0')).join('/');
+    const pathogen = [...newCul.map((e) => ({ day: e.day, md: pad(e.md), label: e.label, res: e.res || '-' })), ...culPend.map((e) => ({ ...e, md: pad(e.md) }))].sort((a, b) => a.day - b.day);
+    const image = imgPend.map((e) => ({ ...e, md: pad(e.md) })).sort((a, b) => a.day - b.day);
+    const lab = out.join('\n');
+    const parts = [lab];
+    if (pathogen.length) parts.push('[Pathogen]\n' + pathogen.map((e) => `<${e.md}> ${e.label}: ${e.res}`).join('\n'));
+    if (image.length) parts.push('[Image]\n' + image.map((e) => `<${e.md}> ${e.title}: pending`).join('\n'));
+    // text：整份（給批次輸出）；lab／pathogen／image：分開的三部分（給病程頁工作畫面各自併進對應的段落）
+    return { text: parts.filter(Boolean).join('\n') || '（上一篇之後沒有新的檢驗結果）', cutoff, lab, pathogen, image };
   }
   return { parse, process, lastNoteLabDay, cultureType };
 })();

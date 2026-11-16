@@ -57,7 +57,7 @@ const wsAll = [wsCore, css, ws('view.js'), ws('page.js')].join('\n');
 const wsHeader = `// ==UserScript==
 // @name         NTUH Progress note 工作畫面
 // @namespace    local.ntuh-progress-note
-// @version      0.3.1
+// @version      0.5.1
 // @description  在病程頁右側顯示生命徵象時間軸、I/O、用藥與醫囑變動、Lab、培養與藥敏、影像報告，並可把內容插入 note。只讀資料，不會自己儲存病歷。
 // @match        *://*.ntuh.gov.tw/WebApplication/InPatient/Ward/InsertProgressNoteContent.aspx*
 // @grant        none

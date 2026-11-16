@@ -117,6 +117,7 @@ if (/[?&]kind=none/.test(location.search)) document.getElementById('NTUHWeb1_Pnl
   const M = w.M, H = 3600e3, DAY = 24 * H, now = (+new Date());
   const d0 = new Date(now).setHours(0, 0, 0, 0);
   const md = (k) => { const d = new Date(d0 + k * DAY); return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); };
+  const dnum = (k) => { const d = new Date(d0 + k * DAY); return (d.getMonth() + 1) * 100 + d.getDate(); };
   let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
   const vitals = [];
   for (let t = now - 7 * DAY; t < now; t += 4 * H + Math.round(rnd() * H)) {
@@ -139,7 +140,10 @@ if (/[?&]kind=none/.test(location.search)) document.getElementById('NTUHWeb1_Pnl
     abx: [{ name: 'Mepem', generic: 'Meropenem Trihydrate', dose: '1000 mg IV Q12H', start: d0 - DAY, end: null }, { name: 'Ocillina', generic: 'Oxacillin Sodium', dose: '2000 mg IV Q4H', start: d0 - 2 * DAY, end: null }, { name: 'Supecef', generic: 'Cefepime HCl', dose: '2000 mg IV Q12H', start: d0 - 5 * DAY, end: d0 - DAY }],
     meds: { today: [{ id: '1', name: 'Musco 30 mg/tab', generic: 'Ambroxol', dose: '1 tab', route: 'PO', freq: 'TID', start: d0 - 9 * DAY, end: null, atc: ['R05CB06'] }, { id: '2', name: 'Aldactone 25 mg/tab', generic: '', dose: '1 tab', route: 'PO', freq: 'BID', start: d0 - DAY + 16 * H, end: null, atc: ['C03DA01'] }, { id: '3', name: 'Paracetamol 1000 mg/100 mL /vial', generic: '', dose: '500 mg', route: 'IF', freq: 'Q6HPRN', start: d0 - 4 * DAY, end: null, atc: ['N02BE01'] }],
       given: [{ ms: d0 - DAY + 19 * H, id: '3', name: 'Paracetamol 1000 mg/100 mL /vial', dose: '500mg', freq: 'Q6HPRN', route: 'IF' }, { ms: d0 + 1 * H, id: '3', name: 'Paracetamol 1000 mg/100 mL /vial', dose: '500mg', freq: 'Q6HPRN', route: 'IF' }] },
-    orders: { items: [{ ms: d0 - DAY + 15.7 * H, type: '處方', act: '新增', name: 'Amino Acid 7%, Glucose 7.5%, Electrolyte【(PPN) Bfluid】1000 mL IF QD', end: '' }, { ms: d0 + 9.3 * H, type: '處方', act: '刪除', name: 'Albumin【AlbuRx 25 12.5 g/50 mL】25 g IF QD', end: '' }, { ms: d0 + 9 * H, type: '檢驗', act: '新增', name: 'CBC', end: '' }], rows: [] },
+    orders: { items: [{ ms: d0 - DAY + 15.7 * H, type: '處方', act: '新增', name: 'Amino Acid 7%, Glucose 7.5%, Electrolyte【(PPN) Bfluid】1000 mL IF QD', end: '' }, { ms: d0 + 9.3 * H, type: '處方', act: '刪除', name: 'Albumin【AlbuRx 25 12.5 g/50 mL】25 g IF QD', end: '' }, { ms: d0 + 9 * H, type: '檢驗', act: '新增', name: 'CBC', end: '' }], rows: [
+      { type: '影醫', act: '新增', startDay: dnum(0), startMd: md(0), name: 'Chest CT without contrast (Indication:Staging小部位:LUNGS/PLEURA)' },
+      { type: '影醫', act: '新增', startDay: dnum(0), startMd: md(0), name: 'Chest : PA View (Standing)(入院檢查)' },
+      { type: '影醫', act: '新增', startDay: dnum(-3), startMd: md(-3), name: 'Chest : AP View (Supine)' }] },
     labs: { summary: {
       text: `#. Hemogram\n       WBC   Seg   Hb   Plt  CRP\n${md(-3)}  15.2  85    9.1  205  12.6\n${md(-2)}  13.9  82    8.8  212  -\n${md(0)}  12.8  79.6  8.9  230  8.4\n#. Liver\n       ALT\n${md(0)}  20\n#. Renal\n       BUN  CRE  eGFR\n${md(-2)}  46   1.7  32\n${md(0)}  41   1.6  34\n#. Electrolytes\n       Na   K\n${md(-2)}  135  3.6\n${md(0)}  137  3.3\n#. Culture:\n[${md(-2)}] Sputum: Achromobacter species; S. aureus`,
       blood: { dates: keys, items: [

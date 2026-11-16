@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTUH Progress note 工作畫面
 // @namespace    local.ntuh-progress-note
-// @version      0.3.1
+// @version      0.5.1
 // @description  在病程頁右側顯示生命徵象時間軸、I/O、用藥與醫囑變動、Lab、培養與藥敏、影像報告，並可把內容插入 note。只讀資料，不會自己儲存病歷。
 // @match        *://*.ntuh.gov.tw/WebApplication/InPatient/Ward/InsertProgressNoteContent.aspx*
 // @grant        none
@@ -10,6 +10,8 @@
 (() => {
 // ---- src/pn-lab.js ----
 // 檢驗整理（表格＋緊湊）輸出的後處理：合併 Renal & e-、去 eGFR/Glucose、只留上一篇 note 之後的新列、標 pending。
+// 輸出的寫法（使用者 2026-11-16）：培養與病原檢驗放 [Pathogen] 段、影像放 [Image] 段，都不在 [Lab] 底下；
+// 這兩段一筆一行，日期寫 <MM/DD>（方括號留給段落標題）。輸入（檢驗整理）仍是「#. Culture:」＋[MM/DD]。
 const PNLab = (() => {
   const DROP_COLS = new Set(['eGFR', 'Glucose']);
   const COL_GAP = 2, MAX_COLS = 8, EMPTY = '-';
@@ -111,7 +113,7 @@ const PNLab = (() => {
     [/\bPT\b|Prothrombin/i, 'Coagulation', ['PT', 'INR']], [/a\.?P\.?T\.?T/i, 'Coagulation', ['aPTT']],
     [/NT-?pro/i, 'Cardiac', ['NT-proBNP']], [/CK-MB/i, 'Cardiac', ['CK-MB']], [/\bCK\b/, 'Cardiac', ['CK']], [/Troponin/i, 'Cardiac', ['TnT']],
   ];
-  const cultureType = (s) => (/blood|\bB\/C|^B2/i.test(s) ? 'B/C' : /urine|\bU\/C|^B3/i.test(s) ? 'U/C' : /sputum|\bSpu?\/C|\bS\/C/i.test(s) ? 'Spu/C'
+  const cultureType = (s) => (/influenza/i.test(s) ? 'Influenza A+B' : /sars-cov|covid/i.test(s) ? 'SARS-CoV-2' : /blood|\bB\/C|^B2/i.test(s) ? 'B/C' : /urine|\bU\/C|^B3/i.test(s) ? 'U/C' : /sputum|\bSpu?\/C|\bS\/C/i.test(s) ? 'Spu/C'
     : /cvc|cvp|picc|catheter tip|Cath/i.test(s) ? 'Tip/C' : /wound|pus|W\/C/i.test(s) ? 'W/C' : /stool/i.test(s) ? 'Stool/C' : 'Cul');
 
   // labText：檢驗整理表格＋緊湊輸出；note：上一篇 note；orderRows：醫囑簽收（全部）；pacsAll：已出報告影像
@@ -142,7 +144,7 @@ const PNLab = (() => {
     const culEntries = [];
     if (cul) for (const l of cul.lines) { const m = l.match(/^\[(\d{1,2})\/(\d{1,2})\]\s*(.+?):\s*(.*)$/); if (m) culEntries.push({ day: +m[1] * 100 + +m[2], md: `${m[1]}/${m[2]}`, label: m[3], type: cultureType(m[3]), res: m[4], line: l }); }
     const newCul = culEntries.filter((e) => e.day > cutoff || notePending.has(e.day + '|' + e.type));
-    // pending：醫囑有開、報告還沒出；抽血依項目放回各檢驗類別，培養放 Culture，影像放 Image
+    // pending：醫囑有開、報告還沒出；抽血依項目放回各檢驗類別，培養與病原檢驗放 [Pathogen]，影像放 [Image]
     const labPend = new Map();   // group → Map(day → { md, cols:Set, names:Set })
     const addLabPend = (grp, o, cols, name) => {
       if (!labPend.has(grp)) labPend.set(grp, new Map());
@@ -151,7 +153,10 @@ const PNLab = (() => {
     };
     const culPend = [], imgPend = [];
     const seen = new Set();
-    const norm = (s) => String(s).replace(/\[[^\]]*\]/g, '').replace(/\(V\d+\)/g, '').replace(/特殊醫囑.*$/, '').replace(/\(Specimen.*$/, '').replace(/\s+/g, '').toLowerCase();
+    // 醫囑名稱後面常帶「(Indication:…小部位:…)」「(入院檢查)」，報告標題沒有；比對前先拿掉
+    const norm = (s) => String(s).replace(/\[[^\]]*\]/g, '').replace(/\(V\d+\)/g, '').replace(/特殊醫囑.*$/, '').replace(/\(Specimen.*$/, '').replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
+    // 同一項檢查：名稱相同，或其中一邊是另一邊的開頭（醫囑名稱比報告標題多了附註時）
+    const sameExam = (a, b) => a === b || (a.length >= 6 && b.length >= 6 && (a.startsWith(b) || b.startsWith(a)));
     const delKeys = new Set((orderRows || []).filter((o) => /刪除/.test(o.act)).map((o) => o.startDay + '|' + norm(o.name)));
     for (const o of orderRows || []) {
       if (/刪除/.test(o.act) || !o.startDay || o.startDay > todayNum || delKeys.has(o.startDay + '|' + norm(o.name))) continue;
@@ -159,12 +164,12 @@ const PNLab = (() => {
       if (/影醫/.test(o.type)) {
         if (!/新增/.test(o.act)) continue;
         const key = 'img|' + o.startDay + '|' + norm(o.name); if (seen.has(key)) continue; seen.add(key);
-        const done = (pacsAll || []).some((p) => norm(p.title) === norm(o.name) && p.day >= o.startDay - 1 && p.day <= o.startDay + 3);
-        if (!done) imgPend.push(`[${o.startMd}] ${o.name.replace(/\[[^\]]*\]/g, '').replace(/特殊醫囑.*$/, '').trim()}: pending`);
-      } else if (/檢驗/.test(o.type) && /culture|ID\+DS|培養|Gram|AFS|Fungus/i.test(o.name)) {
+        const done = (pacsAll || []).some((p) => sameExam(norm(p.title), norm(o.name)) && p.day >= o.startDay - 1 && p.day <= o.startDay + 3);
+        if (!done) imgPend.push({ day: o.startDay, md: o.startMd, title: o.name.replace(/\[[^\]]*\]/g, '').replace(/特殊醫囑.*$/, '').replace(/\s*\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').trim() });
+      } else if (/檢驗/.test(o.type) && /culture|ID\+DS|培養|Gram|AFS|Fungus|Influenza|SARS-CoV/i.test(o.name)) {
         const type = cultureType(o.name);
         const key = 'cul|' + o.startDay + '|' + type; if (seen.has(key)) continue; seen.add(key);
-        if (!culEntries.some((e) => e.day === o.startDay && e.type === type)) culPend.push({ day: o.startDay, line: `[${o.startMd}] ${type}: pending` });
+        if (!culEntries.some((e) => e.day === o.startDay && e.type === type)) culPend.push({ day: o.startDay, md: o.startMd, label: type, res: 'pending' });
       } else if (/檢驗/.test(o.type) && !/ABO|Rh blood|Antibody|Blood Type|備血|cross/i.test(o.name) && (o.startDay > cutoff || o.startDay === todayNum)) {
         if (/Urinalysis|\bU\/A\b|Specimen:\s*URI|urine/i.test(o.name)) { addLabPend('Urine', o, [], ''); continue; }
         const hits = LAB_MAP.filter(([re]) => re.test(o.name));
@@ -198,10 +203,15 @@ const PNLab = (() => {
       const t = buildTable(name, cols, rows);
       if (t || whole.length) out.push((t || `#. ${name}`) + (whole.length ? '\n' + whole.join('\n') : ''));
     }
-    const culLines = [...newCul.map((e) => ({ day: e.day, line: e.line })), ...culPend].sort((a, b) => a.day - b.day).map((e) => e.line);
-    if (culLines.length) out.push('#. Culture:\n' + culLines.join('\n'));
-    if (imgPend.length) out.push('#. Image:\n' + imgPend.join('\n'));
-    return { text: out.join('\n') || '（上一篇之後沒有新的檢驗結果）', cutoff };
+    const pad = (md) => String(md).split('/').map((x) => x.padStart(2, '0')).join('/');
+    const pathogen = [...newCul.map((e) => ({ day: e.day, md: pad(e.md), label: e.label, res: e.res || '-' })), ...culPend.map((e) => ({ ...e, md: pad(e.md) }))].sort((a, b) => a.day - b.day);
+    const image = imgPend.map((e) => ({ ...e, md: pad(e.md) })).sort((a, b) => a.day - b.day);
+    const lab = out.join('\n');
+    const parts = [lab];
+    if (pathogen.length) parts.push('[Pathogen]\n' + pathogen.map((e) => `<${e.md}> ${e.label}: ${e.res}`).join('\n'));
+    if (image.length) parts.push('[Image]\n' + image.map((e) => `<${e.md}> ${e.title}: pending`).join('\n'));
+    // text：整份（給批次輸出）；lab／pathogen／image：分開的三部分（給病程頁工作畫面各自併進對應的段落）
+    return { text: parts.filter(Boolean).join('\n') || '（上一篇之後沒有新的檢驗結果）', cutoff, lab, pathogen, image };
   }
   return { parse, process, lastNoteLabDay, cultureType };
 })();
@@ -3123,7 +3133,7 @@ const PNW_HIS = (() => {
 })();
 if (typeof window !== 'undefined') window.PNW_HIS = PNW_HIS;
 
-const PNW_CSS = ":host {\n  all: initial;\n  --shell: #0f3540; --shell-2: #1a4855; --shell-line: #2c5b68; --on-shell: #eef5f6; --on-shell-dim: #b3cbd0;\n  --ground: #e6ecec; --panel: #ffffff; --head: #f1f5f5; --line: #cfd9da; --line-soft: #e4eaeb;\n  --ink: #12282e; --ink-2: #41585f; --ink-3: #5a7078;\n  --accent: #0b6676; --accent-ink: #084c58; --accent-bg: #dceef1; --since: #eaf5f6;\n  --hi: #ad1f2d; --hi-bg: #fde6e8; --lo: #1a59a0; --lo-bg: #e1edfa;\n  --ok: #1c6f37; --ok-bg: #dff2e3; --warn: #7d5200; --warn-bg: #fbecc8; --mute-bg: #e9eeee;\n  --ui: \"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft JhengHei UI\", \"PingFang TC\", system-ui, sans-serif;\n  --ease: cubic-bezier(.16, 1, .3, 1);\n}\n*, *::before, *::after { box-sizing: border-box; }\n* { scrollbar-width: thin; scrollbar-color: #b4c3c6 transparent; }\n::selection { background: #b9dfe6; color: var(--ink); }\nbutton, select { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }\nh2, p, ul { margin: 0; padding: 0; }\nul { list-style: none; }\n.ic { width: 16px; height: 16px; flex: none; }\n\n.dock {\n  position: fixed; top: 0; right: 0; bottom: 0; width: var(--dock-w, 1220px); z-index: 2147483000;\n  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr);\n  background: var(--ground); color: var(--ink); border-left: 1px solid #7f979c;\n  font: 13px/1.45 var(--ui); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; text-align: left;\n}\n.dock[hidden] { display: none; }\n.reopen {\n  position: fixed; right: 0; top: 40%; z-index: 2147483000; writing-mode: vertical-rl;\n  padding: 10px 5px; border: 0; border-radius: 6px 0 0 6px; background: var(--shell); color: var(--on-shell); font: 600 13px var(--ui); letter-spacing: .1em;\n}\n.reopen[hidden] { display: none; }\n\n/* 工具列 */\n.bar { display: flex; align-items: center; gap: 10px; height: 38px; min-width: 0; padding: 0 8px 0 12px; background: var(--shell); color: var(--on-shell); white-space: nowrap; }\n.bar > * { flex: none; }\n.bar :focus-visible { outline-color: #9fe0ea; }\n.bar b { font-size: 14px; font-weight: 650; }\n.bar .dim { color: var(--on-shell-dim); font-size: 12px; }\n.bar .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--on-shell-dim); font-size: 12.5px; }\n.bar .status.done { color: #c9f1c9; font-weight: 600; }\n.bar .status.warn { color: #ffd98a; font-weight: 600; }\n.bar select { height: 26px; max-width: 210px; border: 1px solid var(--shell-line); border-radius: 5px; background: var(--shell-2); color: var(--on-shell); font-size: 12.5px; padding: 0 4px; }\n.seg { display: flex; border: 1px solid var(--shell-line); border-radius: 5px; overflow: hidden; }\n.seg button { border: 0; background: none; color: var(--on-shell-dim); padding: 3px 9px; font-size: 12.5px; }\n.seg button + button { border-left: 1px solid var(--shell-line); }\n.seg button:hover { color: var(--on-shell); background: var(--shell-2); }\n.seg button[aria-pressed=\"true\"] { background: var(--on-shell); color: var(--shell); font-weight: 600; }\n.bar-btn { display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--shell-line); border-radius: 5px; background: none; color: var(--on-shell); font-size: 12.5px; }\n.bar-btn:hover { background: var(--shell-2); }\n.bar-btn[aria-pressed=\"true\"] { background: var(--shell-2); border-color: #5d8d99; }\n\n/* 時間軸 */\n.tl { display: grid; grid-template-columns: 196px minmax(0, 1fr); background: var(--panel); border-bottom: 1px solid var(--line); }\n.tl-legend { background: var(--head); border-right: 1px solid var(--line); }\n.tl-leg { display: flex; align-items: center; gap: 7px; padding: 0 6px 0 10px; border-top: 1px solid var(--line-soft); white-space: nowrap; overflow: hidden; }\n.tl-leg:first-child { border-top: 0; }\n.tl-leg .n { width: 38px; color: var(--ink-2); font-size: 12px; flex: none; }\n.tl-leg .v { font-size: 14px; font-weight: 650; }\n.tl-leg .v.hi { color: var(--hi); }\n.tl-leg .v.lo { color: var(--lo); }\n.tl-leg .s { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }\n.tl-leg.abx { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; padding-top: 2px; }\n.tl-leg.abx div { display: flex; gap: 8px; height: 17px; align-items: center; font-size: 12px; overflow: hidden; }\n.tl-leg.abx b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }\n.tl-leg.axis { justify-content: space-between; color: var(--ink-3); font-size: 12px; }\n.tl-leg .ib { margin-left: auto; }\n.tl-plot { position: relative; min-width: 0; }\n#tlSvg { display: block; width: 100%; }\n#tlSvg text { font-family: var(--ui); font-size: 11px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }\n.tl-since { fill: var(--since); }\n.tl-sep { stroke: var(--line-soft); }\n.tl-day { stroke: var(--line); }\n.tl-tick { stroke: var(--line-soft); }\n.tl-thr { stroke: var(--hi); stroke-dasharray: 3 3; opacity: .55; }\n.tl-line { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linejoin: round; }\n.tl-line.t { stroke: #7a4a16; stroke-width: 1.7; }\n.tl-dot { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1.3; }\n.tl-dot.t { stroke: #7a4a16; }\n.tl-dot.hi { fill: var(--hi); stroke: var(--hi); }\n.tl-dot.lo { fill: var(--lo); stroke: var(--lo); }\n.tl-bp { stroke: var(--ink-2); stroke-width: 2.5; stroke-linecap: round; }\n.tl-in { fill: #7fb9c4; }\n.tl-out { fill: #53666d; }\n#tlSvg text.net { fill: var(--ink); font-weight: 600; }\n#tlSvg text.net.neg { fill: var(--lo); }\n#tlSvg text.val { fill: var(--ink); }\n#tlSvg text.hi { fill: var(--hi); font-weight: 650; }\n.tl-abx { fill: var(--accent); }\n.tl-abx.ended { fill: #9aaeb3; }\n.tl-abx.alt { fill: #5b4a9c; }\n#tlSvg text.abx { fill: #fff; font-weight: 600; }\n.tl-cx { cursor: pointer; }\n.tl-cx path { stroke-width: 1.4; }\n.tl-cx.grown path { fill: var(--hi); stroke: var(--hi); }\n.tl-cx.pending path { fill: var(--warn-bg); stroke: var(--warn); }\n.tl-cx.ng path { fill: var(--mute-bg); stroke: var(--ink-3); }\n#tlSvg tspan.grown { fill: var(--hi); font-weight: 650; }\n#tlSvg tspan.pending { fill: var(--warn); font-weight: 600; }\n#tlSvg tspan.ng { fill: var(--ink-3); }\n#tlSvg text.since { fill: var(--accent-ink); font-weight: 600; }\n.tl-cross { stroke: var(--ink); stroke-width: 1; opacity: .55; pointer-events: none; }\n.tl-dayhi { fill: var(--accent); opacity: .12; pointer-events: none; }\n.tl-read { position: absolute; top: 6px; z-index: 5; pointer-events: none; min-width: 168px; padding: 7px 10px; border-radius: 5px; background: var(--ink); color: #f0f6f7; font-size: 12px; line-height: 1.5; box-shadow: 0 6px 18px -4px rgba(9, 32, 38, .45); }\n.tl-read[hidden] { display: none; }\n.tl-read b { font-weight: 600; }\n.tl-read .k { color: #a9c2c7; display: inline-block; width: 42px; }\n.tl-read .hot { color: #ffb3ba; font-weight: 650; }\n.tl-read hr { border: 0; border-top: 1px solid #36525a; margin: 4px 0; }\n\n/* 參考區 */\n.ref { display: grid; grid-template-columns: minmax(0, 0.93fr) minmax(0, 1.07fr) minmax(0, 1fr); gap: 8px; padding: 8px; min-height: 0; }\n.col { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-height: 0; overflow-y: auto; overflow-x: hidden; }\n.sec + .sec { border-top: 1px solid var(--line); }\n.sec-h { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 6px 3px 10px; background: var(--head); border-bottom: 1px solid var(--line); }\n.sec-h h2 { font-size: 13px; font-weight: 650; }\n.sec-h .meta { color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.sec-h .sp { flex: 1; }\n.note { padding: 8px 10px; color: var(--ink-3); font-size: 12.5px; }\n.note.err { color: var(--hi); }\n.ib { display: inline-grid; place-items: center; width: 24px; height: 20px; flex: none; border: 0; border-radius: 4px; background: none; color: #8498a0; padding: 0; }\n.ib:hover, .ib:focus-visible { background: var(--accent-bg); color: var(--accent-ink); }\n.ib-text { width: auto; display: inline-flex; gap: 4px; padding: 0 7px 0 4px; height: 22px; color: var(--accent-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }\n.row { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px 2px 10px; min-height: 23px; border-top: 1px solid var(--line-soft); }\n.row:first-child { border-top: 0; }\n.row:hover { background: #f6f9f9; }\n.row .ib { align-self: center; }\n.row .main { flex: 1; min-width: 0; overflow-wrap: anywhere; }\n.row .sub { color: var(--ink-3); font-size: 12px; white-space: nowrap; }\n.row .dose { color: var(--ink-2); font-size: 12px; }\n.grp { padding: 4px 10px 1px; font-size: 12px; color: var(--ink-3); background: #fafcfc; border-top: 1px solid var(--line-soft); }\n.tag { flex: none; min-width: 34px; text-align: center; padding: 0 5px; border-radius: 3px; font-size: 12px; font-weight: 600; background: var(--mute-bg); color: var(--ink-2); white-space: nowrap; }\n.tag.new { background: var(--ok-bg); color: var(--ok); }\n.tag.stop { background: var(--hi-bg); color: var(--hi); }\n.tag.edit, .tag.pending { background: var(--warn-bg); color: var(--warn); }\n.tag.prn, .tag.send { background: var(--lo-bg); color: var(--lo); }\n.tag.rep { background: var(--accent-bg); color: var(--accent-ink); }\n.tag.day { background: var(--accent); color: #fff; min-width: 0; }\n.tag.grown { background: var(--hi-bg); color: var(--hi); }\n.dot-new { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 5px; vertical-align: 2px; }\n.flash-row { animation: rowflash 1.6s var(--ease); }\n@keyframes rowflash { from { background: #bfe3ea; } to { background: transparent; } }\n\ntable { width: 100%; border-collapse: collapse; table-layout: fixed; font: inherit; color: inherit; }\nth { font-weight: 500; }\ntd, th { padding: 0 4px; height: 21px; text-align: right; white-space: nowrap; overflow: hidden; }\ntd:first-child, th:first-child { text-align: left; padding-left: 10px; text-overflow: ellipsis; }\nthead th { position: sticky; z-index: 2; background: var(--panel); color: var(--ink-2); font-size: 12px; }\nthead tr:last-child th { border-bottom: 1px solid var(--line); }\n.since { background: var(--since); }\nthead th.since { background: var(--since); color: var(--accent-ink); font-weight: 650; }\ntbody tr { border-top: 1px solid var(--line-soft); }\n.nil { color: #a9b8bc; }\n\n.io td, .io th { height: 22px; }\n.io thead th { top: 30px; }\n.io .tot td { font-weight: 650; }\n.io .part td:first-child { padding-left: 22px; color: var(--ink-2); }\n.io .part td { color: var(--ink-2); font-size: 12px; }\n.io .net td { border-top: 1px solid var(--line); font-weight: 650; }\n.io .neg { color: var(--lo); }\n.io small { color: var(--ink-3); font-size: 11px; font-weight: 400; }\n\n.lab-tools { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line-soft); }\n.lab-tools .meta { color: var(--ink-3); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink); font-size: 12px; }\n.btn:hover { border-color: #9fb3b7; background: var(--head); }\n.btn[aria-pressed=\"true\"] { background: var(--accent-bg); border-color: #8ec3cc; color: var(--accent-ink); }\n.lab thead th { top: 30px; }\n.lab thead tr:last-child th { top: 51px; font-size: 11px; color: var(--ink-3); }\n.lab .g td { background: var(--head); color: var(--ink-2); font-size: 12px; font-weight: 650; height: 22px; text-align: left; }\n.lab .g td:last-child { text-align: right; padding: 0 1px; }\n.lab .k { all: unset; cursor: pointer; display: flex; align-items: baseline; gap: 5px; width: 100%; color: var(--ink); font: inherit; }\n.lab .k:hover { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }\n.lab .k:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\n.lab .k small { color: var(--ink-3); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }\n.lab td.v { color: var(--ink-2); padding: 0 2px; }\n.lab td.v.last { color: var(--ink); font-weight: 650; }\n.lab td:last-child, .lab th:last-child { padding: 0 1px; }\n.lab .c { display: inline-block; padding: 0 4px; border-radius: 3px; line-height: 17px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }\n.lab .c.hi { background: var(--hi-bg); color: var(--hi); font-weight: 650; }\n.lab .c.lo { background: var(--lo-bg); color: var(--lo); font-weight: 650; }\n.lab sup { font-size: 9px; color: var(--ink-3); margin-left: 1px; }\n.lab .d { color: var(--ink-3); font-size: 12px; }\n.lab tr.hide { display: none; }\n.lab tr.open { background: #f6f9f9; }\n.lab tr.trend td { padding: 0; height: auto; background: #f6f9f9; text-align: left; }\n.lab tr.trend svg { display: block; width: 100%; height: 66px; }\n.lab tr.trend text { font-size: 11px; fill: var(--ink-2); font-family: var(--ui); }\n.lab .band { fill: #dfeaeb; }\n.lab .ln { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }\n.lab .pt { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1.4; }\n.lab .pt.hi { fill: var(--hi); stroke: var(--hi); }\n.lab .pt.lo { fill: var(--lo); stroke: var(--lo); }\n\n.cover { padding: 6px 10px 7px; border-bottom: 1px solid var(--line-soft); display: grid; gap: 4px; }\n.cover div { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }\n.cover b { font-weight: 650; }\n.cover .sub { color: var(--ink-3); font-size: 12px; }\n.days td, .days th { height: 20px; font-size: 12px; }\n.days thead th { top: 30px; }\n.days td:nth-child(2), .days th:nth-child(2) { text-align: left; text-overflow: ellipsis; }\n.days tr.g1 td { background: #fdf1f2; }\n.daybtn, .linkbtn { all: unset; cursor: pointer; color: var(--accent-ink); font: inherit; font-size: 12px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }\n.daybtn:focus-visible, .linkbtn:focus-visible { outline: 2px solid var(--accent); }\n.days .n-g { color: var(--hi); font-weight: 650; }\n.days .n-p { color: var(--warn); font-weight: 650; }\n.sub-h { padding: 5px 10px 2px; font-size: 12px; font-weight: 650; color: var(--ink-2); border-top: 1px solid var(--line); background: #fafcfc; display: flex; gap: 6px; align-items: baseline; }\n.sub-h span { font-weight: 400; color: var(--ink-3); }\n.org { font-weight: 650; color: var(--hi); }\n.stain { display: block; }\n.abg thead th { position: static; height: auto; vertical-align: bottom; padding: 3px 4px; white-space: normal; line-height: 1.2; overflow-wrap: anywhere; }\n.abg thead th small { display: block; color: var(--ink-3); font-size: 11px; font-weight: 400; }\n.abg td { height: 22px; }\n.abg .mic { color: var(--ink-3); font-size: 12px; display: inline-block; min-width: 34px; }\n.abg .sir { display: inline-block; width: 20px; text-align: center; border-radius: 3px; font-weight: 700; font-size: 12px; line-height: 17px; }\n.abg .S { background: var(--ok-bg); color: var(--ok); }\n.abg .I, .abg .SDD { background: var(--warn-bg); color: var(--warn); }\n.abg .R { background: var(--hi-bg); color: var(--hi); }\n.abg tr.using td { background: var(--since); }\n.abg tr.using td:first-child { font-weight: 650; color: var(--accent-ink); }\n.rep .imp { color: var(--ink); }\n.rep .full { padding: 4px 30px 8px 10px; color: var(--ink-2); font-size: 12.5px; line-height: 1.55; background: #f6f9f9; border-top: 1px solid var(--line-soft); white-space: pre-wrap; overflow-wrap: anywhere; }\n.rep .full[hidden] { display: none; }\n.rep .toggle { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; font: inherit; }\n.rep .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\n.rep .toggle .imp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }\n.nurse .row { align-items: flex-start; }\n.nurse .sub { width: 76px; flex: none; padding-top: 1px; }\n[hidden] { display: none !important; }\n\n.dock.narrow .ref { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); overflow-y: auto; align-content: start; }\n.dock.narrow .col { overflow: visible; }\n.dock.narrow .col3 { grid-column: 1 / -1; }\n.dock.narrow .sec-h, .dock.narrow thead th { position: static; }\n@media (prefers-reduced-motion: reduce) { .flash-row { animation: none; } }\n\n/* 區塊收合、Lab 項目編輯、護理交班 */\n.fold { all: unset; display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: -6px; border-radius: 4px; cursor: pointer; color: var(--ink-2); flex: none; }\n.fold:hover { background: var(--line-soft); color: var(--ink); }\n.fold:focus-visible { outline: 2px solid var(--accent); }\n.fold .ic { width: 14px; height: 14px; transition: transform .12s; }\n.sec.folded .fold .ic { transform: rotate(-90deg); }\n.sec.folded .sec-b { display: none; }\n.sec.folded .sec-h { border-bottom: 0; }\n.lab td:first-child:has(.labck) { display: flex; align-items: center; }\n.labck { margin: 0 6px 0 0; flex: none; accent-color: var(--accent); }\n.lab tr.off .k, .lab tr.off td.v, .lab tr.off .d { opacity: .42; }\n.handoff { margin: 0; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.55; color: var(--ink); }\n/* 窄版：兩欄依內容長高，整個參考區一起捲（不然矮螢幕會把欄壓扁、互相蓋住） */\n.dock.narrow .ref { grid-auto-rows: max-content; }\n.dock.narrow .col { min-height: max-content; }\n@media (prefers-reduced-motion: reduce) { .fold .ic { transition: none; } }\n/* 窄版的工具列放不下狀態訊息：訊息自己佔第二行，按鈕可以換行 */\n.dock.narrow .bar { flex-wrap: wrap; height: auto; min-height: 38px; row-gap: 4px; padding-top: 6px; padding-bottom: 6px; }\n.dock.narrow .bar .status { order: 9; flex: 0 0 100%; }\n.dock.narrow .bar .status:empty { display: none; }\n.dock.narrow #barWho, .dock.narrow .bar label:not(.range-n) { display: none; }\n.dock.narrow .bar select { max-width: 128px; }\n.dock.narrow .bar { column-gap: 6px; }\n/* 自訂天數（時間軸、Lab）、選取的時間點、Lab 翻頁 */\n.range-n { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; white-space: nowrap; }\n.range-n[hidden] { display: none; }\n.range-n input { width: 44px; height: 24px; padding: 0 2px 0 5px; border: 1px solid var(--shell-line); border-radius: 5px; background: var(--shell-2); color: var(--on-shell); font: inherit; font-variant-numeric: tabular-nums; }\n.lab-n { color: var(--ink-2); }\n.lab-n input { height: 22px; border-color: var(--line); background: var(--panel); color: var(--ink); }\n.range-n input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\n.pager { display: inline-flex; gap: 2px; }\n.pager .btn { padding: 0 7px; font-size: 14px; line-height: 20px; }\n.btn:disabled { opacity: .4; cursor: default; }\n.tl-pin { stroke: var(--accent); stroke-width: 1.5; }\n.tl-plot { cursor: crosshair; }\n.tl-leg.pinned .v { color: var(--accent-ink); }\n.tl-leg.pinned .v.hi { color: var(--hi); }\n.tl-leg.pinned .v.lo { color: var(--lo); }\n.tl-leg.axis .linkbtn { overflow: hidden; text-overflow: ellipsis; }\n.lab-tools { flex-wrap: wrap; row-gap: 4px; }\n.tl-leg.axis .lim { color: var(--warn); }\n";
+const PNW_CSS = ":host {\n  all: initial;\n  --shell: #0f3540; --shell-2: #1a4855; --shell-line: #2c5b68; --on-shell: #eef5f6; --on-shell-dim: #b3cbd0;\n  --ground: #e6ecec; --panel: #ffffff; --head: #f1f5f5; --line: #cfd9da; --line-soft: #e4eaeb;\n  --ink: #12282e; --ink-2: #41585f; --ink-3: #5a7078;\n  --accent: #0b6676; --accent-ink: #084c58; --accent-bg: #dceef1; --since: #eaf5f6;\n  --hi: #ad1f2d; --hi-bg: #fde6e8; --lo: #1a59a0; --lo-bg: #e1edfa;\n  --ok: #1c6f37; --ok-bg: #dff2e3; --warn: #7d5200; --warn-bg: #fbecc8; --mute-bg: #e9eeee;\n  --ui: \"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft JhengHei UI\", \"PingFang TC\", system-ui, sans-serif;\n  --ease: cubic-bezier(.16, 1, .3, 1);\n}\n*, *::before, *::after { box-sizing: border-box; }\n* { scrollbar-width: thin; scrollbar-color: #b4c3c6 transparent; }\n::selection { background: #b9dfe6; color: var(--ink); }\nbutton, select { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }\nh2, p, ul { margin: 0; padding: 0; }\nul { list-style: none; }\n.ic { width: 16px; height: 16px; flex: none; }\n\n.dock {\n  position: fixed; top: 0; right: 0; bottom: 0; width: var(--dock-w, 1220px); z-index: 2147483000;\n  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr);\n  background: var(--ground); color: var(--ink); border-left: 1px solid #7f979c;\n  font: 13px/1.45 var(--ui); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; text-align: left;\n}\n.dock[hidden] { display: none; }\n.reopen {\n  position: fixed; right: 0; top: 40%; z-index: 2147483000; writing-mode: vertical-rl;\n  padding: 10px 5px; border: 0; border-radius: 6px 0 0 6px; background: var(--shell); color: var(--on-shell); font: 600 13px var(--ui); letter-spacing: .1em;\n}\n.reopen[hidden] { display: none; }\n\n/* 工具列 */\n.bar { display: flex; align-items: center; gap: 10px; height: 38px; min-width: 0; padding: 0 8px 0 12px; background: var(--shell); color: var(--on-shell); white-space: nowrap; }\n.bar > * { flex: none; }\n.bar :focus-visible { outline-color: #9fe0ea; }\n.bar b { font-size: 14px; font-weight: 650; }\n.bar .dim { color: var(--on-shell-dim); font-size: 12px; }\n.bar .status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--on-shell-dim); font-size: 12.5px; }\n.bar .status.done { color: #c9f1c9; font-weight: 600; }\n.bar .status.warn { color: #ffd98a; font-weight: 600; }\n.bar select { height: 26px; max-width: 210px; border: 1px solid var(--shell-line); border-radius: 5px; background: var(--shell-2); color: var(--on-shell); font-size: 12.5px; padding: 0 4px; }\n.seg { display: flex; border: 1px solid var(--shell-line); border-radius: 5px; overflow: hidden; }\n.seg button { border: 0; background: none; color: var(--on-shell-dim); padding: 3px 9px; font-size: 12.5px; }\n.seg button + button { border-left: 1px solid var(--shell-line); }\n.seg button:hover { color: var(--on-shell); background: var(--shell-2); }\n.seg button[aria-pressed=\"true\"] { background: var(--on-shell); color: var(--shell); font-weight: 600; }\n.bar-btn { display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--shell-line); border-radius: 5px; background: none; color: var(--on-shell); font-size: 12.5px; }\n.bar-btn:hover { background: var(--shell-2); }\n.bar-btn[aria-pressed=\"true\"] { background: var(--shell-2); border-color: #5d8d99; }\n\n/* 時間軸 */\n.tl { display: grid; grid-template-columns: 196px minmax(0, 1fr); background: var(--panel); border-bottom: 1px solid var(--line); }\n.tl-legend { background: var(--head); border-right: 1px solid var(--line); }\n.tl-leg { display: flex; align-items: center; gap: 7px; padding: 0 6px 0 10px; border-top: 1px solid var(--line-soft); white-space: nowrap; overflow: hidden; }\n.tl-leg:first-child { border-top: 0; }\n.tl-leg .n { width: 38px; color: var(--ink-2); font-size: 12px; flex: none; }\n.tl-leg .v { font-size: 14px; font-weight: 650; }\n.tl-leg .v.hi { color: var(--hi); }\n.tl-leg .v.lo { color: var(--lo); }\n.tl-leg .s { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }\n.tl-leg.abx { flex-direction: column; align-items: stretch; justify-content: center; gap: 0; padding-top: 2px; }\n.tl-leg.abx div { display: flex; gap: 8px; height: 17px; align-items: center; font-size: 12px; overflow: hidden; }\n.tl-leg.abx b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }\n.tl-leg.axis { justify-content: space-between; color: var(--ink-3); font-size: 12px; }\n.tl-leg .ib { margin-left: auto; }\n.tl-plot { position: relative; min-width: 0; }\n#tlSvg { display: block; width: 100%; }\n#tlSvg text { font-family: var(--ui); font-size: 11px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }\n.tl-since { fill: var(--since); }\n.tl-sep { stroke: var(--line-soft); }\n.tl-day { stroke: var(--line); }\n.tl-tick { stroke: var(--line-soft); }\n.tl-thr { stroke: var(--hi); stroke-dasharray: 3 3; opacity: .55; }\n.tl-line { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-linejoin: round; }\n.tl-line.t { stroke: #7a4a16; stroke-width: 1.7; }\n.tl-dot { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1.3; }\n.tl-dot.t { stroke: #7a4a16; }\n.tl-dot.hi { fill: var(--hi); stroke: var(--hi); }\n.tl-dot.lo { fill: var(--lo); stroke: var(--lo); }\n.tl-bp { stroke: var(--ink-2); stroke-width: 2.5; stroke-linecap: round; }\n.tl-in { fill: #7fb9c4; }\n.tl-out { fill: #53666d; }\n#tlSvg text.net { fill: var(--ink); font-weight: 600; }\n#tlSvg text.net.neg { fill: var(--lo); }\n#tlSvg text.val { fill: var(--ink); }\n#tlSvg text.hi { fill: var(--hi); font-weight: 650; }\n.tl-abx { fill: var(--accent); }\n.tl-abx.ended { fill: #9aaeb3; }\n.tl-abx.alt { fill: #5b4a9c; }\n#tlSvg text.abx { fill: #fff; font-weight: 600; }\n.tl-cx { cursor: pointer; }\n.tl-cx path { stroke-width: 1.4; }\n.tl-cx.grown path { fill: var(--hi); stroke: var(--hi); }\n.tl-cx.pending path { fill: var(--warn-bg); stroke: var(--warn); }\n.tl-cx.ng path { fill: var(--mute-bg); stroke: var(--ink-3); }\n#tlSvg tspan.grown { fill: var(--hi); font-weight: 650; }\n#tlSvg tspan.pending { fill: var(--warn); font-weight: 600; }\n#tlSvg tspan.ng { fill: var(--ink-3); }\n#tlSvg text.since { fill: var(--accent-ink); font-weight: 600; }\n.tl-cross { stroke: var(--ink); stroke-width: 1; opacity: .55; pointer-events: none; }\n.tl-dayhi { fill: var(--accent); opacity: .12; pointer-events: none; }\n.tl-read { position: absolute; top: 6px; z-index: 5; pointer-events: none; min-width: 168px; padding: 7px 10px; border-radius: 5px; background: var(--ink); color: #f0f6f7; font-size: 12px; line-height: 1.5; box-shadow: 0 6px 18px -4px rgba(9, 32, 38, .45); }\n.tl-read[hidden] { display: none; }\n.tl-read b { font-weight: 600; }\n.tl-read .k { color: #a9c2c7; display: inline-block; width: 42px; }\n.tl-read .hot { color: #ffb3ba; font-weight: 650; }\n.tl-read hr { border: 0; border-top: 1px solid #36525a; margin: 4px 0; }\n\n/* 參考區 */\n.ref { display: grid; grid-template-columns: minmax(0, 0.93fr) minmax(0, 1.07fr) minmax(0, 1fr); gap: 8px; padding: 8px; min-height: 0; }\n.col { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-height: 0; overflow-y: auto; overflow-x: hidden; }\n.sec + .sec { border-top: 1px solid var(--line); }\n.sec-h { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 6px 3px 10px; background: var(--head); border-bottom: 1px solid var(--line); }\n.sec-h h2 { font-size: 13px; font-weight: 650; }\n.sec-h .meta { color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n.sec-h .sp { flex: 1; }\n.note { padding: 8px 10px; color: var(--ink-3); font-size: 12.5px; }\n.note.err { color: var(--hi); }\n.ib { display: inline-grid; place-items: center; width: 24px; height: 20px; flex: none; border: 0; border-radius: 4px; background: none; color: #8498a0; padding: 0; }\n.ib:hover, .ib:focus-visible { background: var(--accent-bg); color: var(--accent-ink); }\n.ib-text { width: auto; display: inline-flex; gap: 4px; padding: 0 7px 0 4px; height: 22px; color: var(--accent-ink); font-size: 12px; font-weight: 600; white-space: nowrap; }\n.row { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px 2px 10px; min-height: 23px; border-top: 1px solid var(--line-soft); }\n.row:first-child { border-top: 0; }\n.row:hover { background: #f6f9f9; }\n.row .ib { align-self: center; }\n.row .main { flex: 1; min-width: 0; overflow-wrap: anywhere; }\n.row .sub { color: var(--ink-3); font-size: 12px; white-space: nowrap; }\n.row .dose { color: var(--ink-2); font-size: 12px; }\n.grp { padding: 4px 10px 1px; font-size: 12px; color: var(--ink-3); background: #fafcfc; border-top: 1px solid var(--line-soft); }\n.tag { flex: none; min-width: 34px; text-align: center; padding: 0 5px; border-radius: 3px; font-size: 12px; font-weight: 600; background: var(--mute-bg); color: var(--ink-2); white-space: nowrap; }\n.tag.new { background: var(--ok-bg); color: var(--ok); }\n.tag.stop { background: var(--hi-bg); color: var(--hi); }\n.tag.edit, .tag.pending { background: var(--warn-bg); color: var(--warn); }\n.tag.prn, .tag.send { background: var(--lo-bg); color: var(--lo); }\n.tag.rep { background: var(--accent-bg); color: var(--accent-ink); }\n.tag.day { background: var(--accent); color: #fff; min-width: 0; }\n.tag.grown { background: var(--hi-bg); color: var(--hi); }\n.dot-new { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 5px; vertical-align: 2px; }\n.flash-row { animation: rowflash 1.6s var(--ease); }\n@keyframes rowflash { from { background: #bfe3ea; } to { background: transparent; } }\n\ntable { width: 100%; border-collapse: collapse; table-layout: fixed; font: inherit; color: inherit; }\nth { font-weight: 500; }\ntd, th { padding: 0 4px; height: 21px; text-align: right; white-space: nowrap; overflow: hidden; }\ntd:first-child, th:first-child { text-align: left; padding-left: 10px; text-overflow: ellipsis; }\nthead th { position: sticky; z-index: 2; background: var(--panel); color: var(--ink-2); font-size: 12px; }\nthead tr:last-child th { border-bottom: 1px solid var(--line); }\n.since { background: var(--since); }\nthead th.since { background: var(--since); color: var(--accent-ink); font-weight: 650; }\ntbody tr { border-top: 1px solid var(--line-soft); }\n.nil { color: #a9b8bc; }\n\n.io td, .io th { height: 22px; }\n.io thead th { top: 30px; }\n.io .tot td { font-weight: 650; }\n.io .part td:first-child { padding-left: 22px; color: var(--ink-2); }\n.io .part td { color: var(--ink-2); font-size: 12px; }\n.io .net td { border-top: 1px solid var(--line); font-weight: 650; }\n.io .neg { color: var(--lo); }\n.io small { color: var(--ink-3); font-size: 11px; font-weight: 400; }\n\n.lab-tools { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line-soft); }\n.lab-tools .meta { color: var(--ink-3); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\n.btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; padding: 2px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink); font-size: 12px; }\n.btn:hover { border-color: #9fb3b7; background: var(--head); }\n.btn[aria-pressed=\"true\"] { background: var(--accent-bg); border-color: #8ec3cc; color: var(--accent-ink); }\n.lab thead th { top: 30px; }\n.lab thead tr:last-child th { top: 51px; font-size: 11px; color: var(--ink-3); }\n.lab .g td { background: var(--head); color: var(--ink-2); font-size: 12px; font-weight: 650; height: 22px; text-align: left; }\n.lab .g td:last-child { text-align: right; padding: 0 1px; }\n.lab .k { all: unset; cursor: pointer; display: flex; align-items: baseline; gap: 5px; width: 100%; color: var(--ink); font: inherit; }\n.lab .k:hover { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }\n.lab .k:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\n.lab .k small { color: var(--ink-3); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }\n.lab td.v { color: var(--ink-2); padding: 0 2px; }\n.lab td.v.last { color: var(--ink); font-weight: 650; }\n.lab td:last-child, .lab th:last-child { padding: 0 1px; }\n.lab .c { display: inline-block; padding: 0 4px; border-radius: 3px; line-height: 17px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }\n.lab .c.hi { background: var(--hi-bg); color: var(--hi); font-weight: 650; }\n.lab .c.lo { background: var(--lo-bg); color: var(--lo); font-weight: 650; }\n.lab sup { font-size: 9px; color: var(--ink-3); margin-left: 1px; }\n.lab .d { color: var(--ink-3); font-size: 12px; }\n.lab tr.hide { display: none; }\n.lab tr.open { background: #f6f9f9; }\n.lab tr.trend td { padding: 0; height: auto; background: #f6f9f9; text-align: left; }\n.lab tr.trend svg { display: block; width: 100%; height: 66px; }\n.lab tr.trend text { font-size: 11px; fill: var(--ink-2); font-family: var(--ui); }\n.lab .band { fill: #dfeaeb; }\n.lab .ln { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }\n.lab .pt { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1.4; }\n.lab .pt.hi { fill: var(--hi); stroke: var(--hi); }\n.lab .pt.lo { fill: var(--lo); stroke: var(--lo); }\n\n.cover { padding: 6px 10px 7px; border-bottom: 1px solid var(--line-soft); display: grid; gap: 4px; }\n.cover div { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }\n.cover b { font-weight: 650; }\n.cover .sub { color: var(--ink-3); font-size: 12px; }\n.days td, .days th { height: 20px; font-size: 12px; }\n.days thead th { top: 30px; }\n.days td:nth-child(2), .days th:nth-child(2) { text-align: left; text-overflow: ellipsis; }\n.days tr.g1 td { background: #fdf1f2; }\n.daybtn, .linkbtn { all: unset; cursor: pointer; color: var(--accent-ink); font: inherit; font-size: 12px; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }\n.daybtn:focus-visible, .linkbtn:focus-visible { outline: 2px solid var(--accent); }\n.days .n-g { color: var(--hi); font-weight: 650; }\n.days .n-p { color: var(--warn); font-weight: 650; }\n.sub-h { padding: 5px 10px 2px; font-size: 12px; font-weight: 650; color: var(--ink-2); border-top: 1px solid var(--line); background: #fafcfc; display: flex; gap: 6px; align-items: baseline; }\n.sub-h span { font-weight: 400; color: var(--ink-3); }\n.org { font-weight: 650; color: var(--hi); }\n.stain { display: block; }\n.abg thead th { position: static; height: auto; vertical-align: bottom; padding: 3px 4px; white-space: normal; line-height: 1.2; overflow-wrap: anywhere; }\n.abg thead th small { display: block; color: var(--ink-3); font-size: 11px; font-weight: 400; }\n.abg td { height: 22px; }\n.abg .mic { color: var(--ink-3); font-size: 12px; display: inline-block; min-width: 34px; }\n.abg .sir { display: inline-block; width: 20px; text-align: center; border-radius: 3px; font-weight: 700; font-size: 12px; line-height: 17px; }\n.abg .S { background: var(--ok-bg); color: var(--ok); }\n.abg .I, .abg .SDD { background: var(--warn-bg); color: var(--warn); }\n.abg .R { background: var(--hi-bg); color: var(--hi); }\n.abg tr.using td { background: var(--since); }\n.abg tr.using td:first-child { font-weight: 650; color: var(--accent-ink); }\n.rep .imp { color: var(--ink); }\n.rep .full { padding: 4px 30px 8px 10px; color: var(--ink-2); font-size: 12.5px; line-height: 1.55; background: #f6f9f9; border-top: 1px solid var(--line-soft); white-space: pre-wrap; overflow-wrap: anywhere; }\n.rep .full[hidden] { display: none; }\n.rep .toggle { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; font: inherit; }\n.rep .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\n.rep .toggle .imp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }\n.nurse .row { align-items: flex-start; }\n.nurse .sub { width: 76px; flex: none; padding-top: 1px; }\n[hidden] { display: none !important; }\n\n.dock.narrow .ref { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); overflow-y: auto; align-content: start; }\n.dock.narrow .col { overflow: visible; }\n.dock.narrow .col3 { grid-column: 1 / -1; }\n.dock.narrow .sec-h, .dock.narrow thead th { position: static; }\n@media (prefers-reduced-motion: reduce) { .flash-row { animation: none; } }\n\n/* 區塊收合、Lab 項目編輯、護理交班 */\n.fold { all: unset; display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: -6px; border-radius: 4px; cursor: pointer; color: var(--ink-2); flex: none; }\n.fold:hover { background: var(--line-soft); color: var(--ink); }\n.fold:focus-visible { outline: 2px solid var(--accent); }\n.fold .ic { width: 14px; height: 14px; transition: transform .12s; }\n.sec.folded .fold .ic { transform: rotate(-90deg); }\n.sec.folded .sec-b { display: none; }\n.sec.folded .sec-h { border-bottom: 0; }\n.lab td:first-child:has(.labck) { display: flex; align-items: center; }\n.labck { margin: 0 6px 0 0; flex: none; accent-color: var(--accent); }\n.lab tr.off .k, .lab tr.off td.v, .lab tr.off .d { opacity: .42; }\n.handoff { margin: 0; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.55; color: var(--ink); }\n/* 窄版：兩欄依內容長高，整個參考區一起捲（不然矮螢幕會把欄壓扁、互相蓋住） */\n.dock.narrow .ref { grid-auto-rows: max-content; }\n.dock.narrow .col { min-height: max-content; }\n@media (prefers-reduced-motion: reduce) { .fold .ic { transition: none; } }\n/* 窄版的工具列放不下狀態訊息：訊息自己佔第二行，按鈕可以換行 */\n.dock.narrow .bar { flex-wrap: wrap; height: auto; min-height: 38px; row-gap: 4px; padding-top: 6px; padding-bottom: 6px; }\n.dock.narrow .bar .status { order: 9; flex: 0 0 100%; }\n.dock.narrow .bar .status:empty { display: none; }\n.dock.narrow #barWho, .dock.narrow .bar label:not(.range-n) { display: none; }\n.dock.narrow .bar select { max-width: 128px; }\n.dock.narrow .bar { column-gap: 6px; }\n/* 自訂天數（時間軸、Lab）、選取的時間點、Lab 翻頁 */\n.range-n { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; white-space: nowrap; }\n.range-n[hidden] { display: none; }\n.range-n input { width: 44px; height: 24px; padding: 0 2px 0 5px; border: 1px solid var(--shell-line); border-radius: 5px; background: var(--shell-2); color: var(--on-shell); font: inherit; font-variant-numeric: tabular-nums; }\n.lab-n { color: var(--ink-2); }\n.lab-n input { height: 22px; border-color: var(--line); background: var(--panel); color: var(--ink); }\n.range-n input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }\n.pager { display: inline-flex; gap: 2px; }\n.pager .btn { padding: 0 7px; font-size: 14px; line-height: 20px; }\n.btn:disabled { opacity: .4; cursor: default; }\n.tl-pin { stroke: var(--accent); stroke-width: 1.5; }\n.tl-plot { cursor: crosshair; }\n.tl-leg.pinned .v { color: var(--accent-ink); }\n.tl-leg.pinned .v.hi { color: var(--hi); }\n.tl-leg.pinned .v.lo { color: var(--lo); }\n.tl-leg.axis .linkbtn { overflow: hidden; text-overflow: ellipsis; }\n.lab-tools { flex-wrap: wrap; row-gap: 4px; }\n.tl-leg.axis .lim { color: var(--warn); }\n\n/* 一鍵帶入：工具列上唯一的主要動作 */\n.bar-btn.primary { background: #e6f4f6; border-color: #e6f4f6; color: #0b3c46; font-weight: 650; }\n.bar-btn.primary:hover { background: #fff; border-color: #fff; }\n/* 窄版：其餘按鈕只留圖示（title 有說明），把位置讓給「帶入」與天數輸入框 */\n.dock.narrow .bar-btn .t { display: none; }\n.dock.narrow .bar-btn { padding: 0 7px; }\n.dock.narrow .bar-btn.primary { padding: 0 9px; }\n/* 窄版的狀態訊息自己一行：一鍵帶入的結果比較長，讓它最多排兩行 */\n.dock.narrow .bar .status { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }\n";
 
 // ---- src/workspace/view.js ----
 // Progress note 工作畫面的顯示層：把資料模型 M 畫進 shadow root。不碰網路，也不碰病歷表單。
@@ -3156,11 +3166,12 @@ const PNW_VIEW = (() => {
     <label class="dim" for="baseSel">上一篇</label><select id="baseSel" title="「自上一篇以來」要從哪一篇 note 算起"></select>
     <div class="seg" role="group" aria-label="時間軸範圍"><button type="button" data-range="24">24h</button><button type="button" data-range="72" aria-pressed="true">3 天</button><button type="button" data-range="168">7 天</button><button type="button" data-range="custom" title="自己指定時間軸要看幾天">自訂</button></div>
     <label class="range-n" id="rangeBox" hidden><input type="number" id="rangeDays" min="1" max="60" step="1" value="14" aria-label="時間軸天數"> 天</label>
-    <button class="bar-btn" type="button" id="btnCompact" aria-pressed="false" title="只留體溫、抗生素、培養">${icon('rows')}精簡</button>
+    <button class="bar-btn" type="button" id="btnCompact" aria-pressed="false" title="精簡：時間軸只留體溫、抗生素、培養">${icon('rows')}<span class="t">精簡</span></button>
+    <button class="bar-btn primary" type="button" id="btnFill" title="一鍵帶入：把 V/S、上一篇之後的新 Lab、影像、培養與病原檢驗、管路放進這篇 note 對應的地方。只填空的地方、只加不刪；V/S 那一段如果全是舊數值會換成新的。不會存檔。">${icon('insert')}帶入</button>
     <span class="status" id="status" role="status" aria-live="polite"></span>
-    <button class="bar-btn" type="button" id="btnList" aria-pressed="false" title="顯示或隱藏 HIS 左邊的 note 清單">${icon('list')}清單</button>
-    <button class="bar-btn" type="button" id="btnReload" title="重新抓這位病人的資料">${icon('reload')}重抓</button>
-    <button class="bar-btn" type="button" id="btnHide" title="收起工作畫面，回到 HIS 原本的版面">${icon('close')}收起</button>
+    <button class="bar-btn" type="button" id="btnList" aria-pressed="false" title="清單：顯示或隱藏 HIS 左邊的 note 清單">${icon('list')}<span class="t">清單</span></button>
+    <button class="bar-btn" type="button" id="btnReload" title="重抓：重新抓這位病人的資料">${icon('reload')}<span class="t">重抓</span></button>
+    <button class="bar-btn" type="button" id="btnHide" title="收起：收起工作畫面，回到 HIS 原本的版面">${icon('close')}<span class="t">收起</span></button>
   </div>
   <section class="tl" aria-label="生命徵象、I/O、抗生素與培養的共同時間軸">
     <div class="tl-legend" id="tlLegend"></div>
@@ -3213,7 +3224,7 @@ const PNW_VIEW = (() => {
     let sayTimer = 0;
     function say(msg, kind) {
       const el = $('#status');
-      el.textContent = msg; el.className = 'status' + (kind ? ' ' + kind : '');
+      el.textContent = msg; el.title = msg; el.className = 'status' + (kind ? ' ' + kind : '');
       clearTimeout(sayTimer);
       if (kind) sayTimer = setTimeout(() => { el.className = 'status'; }, 4000);
     }
@@ -3312,6 +3323,8 @@ const PNW_VIEW = (() => {
     // 最接近某個時間、而且有這個欄位的那一筆（一小時內）；點時間軸選取時間點時用
     const nearField = (k, at) => { let b; for (const v of M.vitals || []) if (v[k] != null && Math.abs(v.t - at) <= H && (!b || Math.abs(v.t - at) < Math.abs(b.t - at))) b = v; return b; };
     let geo = null;
+    let curVs = null;   // 目前「插入 V/S」會給的文字（最後一筆，或在時間軸上選的時間點）
+    const tubeLine = (l) => `${l.name.replace(/[（(].*$/, '').trim() || l.name}${fin(l.since) ? ` since ${md(l.since)} (D${dayNo(l.since)})` : ''}`;
     function drawTimeline() {
       const L = lanes();
       const ROWS = [{ id: 't', h: 44 }, { id: 'hr', h: 26 }, { id: 'bp', h: 28 }, { id: 'sp', h: 22 }, { id: 'io', h: 38 }, { id: 'wt', h: 22 }, { id: 'abx', h: Math.max(1, L.length) * 17 + 6 }, { id: 'cx', h: 24 }];
@@ -3471,6 +3484,7 @@ const PNW_VIEW = (() => {
         if (tr.length) lines.push(`體重:${tr.map((r) => r.kg.toFixed(1)).join('>')}(${+md(tr[tr.length - 1].ms).split('/')[0]}/${+md(tr[tr.length - 1].ms).split('/')[1]})`);
         return lines.join('\n');
       };
+      curVs = { text: vsText, when: PIN != null ? `${md(PIN)} ${hm(PIN)} ` : '最後一筆' };
       const dash = '<span class="s">—</span>';
       const html = {
         t: `<span class="n">體溫</span>${lt ? `<span class="v ${lt.temp >= 38 ? 'hi' : ''}">${lt.temp.toFixed(1)}</span><span class="s">${PIN != null ? `${md(lt.t)} ${hm(lt.t)}` : tR ? 'Tmax ' + tR[1].toFixed(1) : hm(lt.t)}</span>` : dash}${insBtn(vsText, PIN != null ? `[V/S] ${md(PIN)} ${hm(PIN)} 的數值` : '[V/S] 最後一筆與體重趨勢')}`,
@@ -3522,7 +3536,7 @@ const PNW_VIEW = (() => {
         rows.push(`<li class="row"><span class="tag rep">報告</span><span class="main">${esc(c.short)} ${md(c.t)}：${c.e.orgs.length ? `<span class="org">${esc(c.e.orgs.map((o) => orgAbbr(o.name)).join('、'))}</span>` : esc(c.e.neg[0])}</span><span class="sub">${md(c.e.reported)} ${hm(c.e.reported)}</span><button class="ib" type="button" data-focus="cx-${c.id}" title="看這份培養" aria-label="看這份培養">${icon('rows')}</button></li>`);
       }
       for (const p of (M.pacs || []).filter((p) => p.ms >= dayStart(B))) {
-        rows.push(`<li class="row"><span class="tag rep">影像</span><span class="main">${esc(p.title)}</span><span class="sub">${md(p.ms)}</span>${insBtn(`[${imgKind(p.title)}] ${new Date(p.ms).getFullYear()}/${md(p.ms)}: ${p.imp.slice(0, 400)}`, p.title)}</li>`);
+        rows.push(`<li class="row"><span class="tag rep">影像</span><span class="main">${esc(p.title)}</span><span class="sub">${md(p.ms)}</span>${insBtn(`<${md(p.ms)}> ${p.title}: ${p.imp.slice(0, 600)}`, p.title)}</li>`);
       }
       h += secOpen('since', '自上一篇以來', `<span class="meta">${fin(M.base) ? `${md(B)} ${hm(B)} 之後` : '找不到上一篇，先用近 24 小時'} · ${rows.length} 項</span>`);
       h += stateNote('orders', '醫囑變更') + stateNote('meds', '給藥紀錄');
@@ -3586,7 +3600,7 @@ const PNW_VIEW = (() => {
       // 管路
       const tubes = M.tubes || [];
       h += `${secOpen('tubes', '管路', `<span class="meta">${tubes.length} 條</span>`)}${stateNote('tubes', '管路')}<ul>`;
-      h += tubes.map((l) => `<li class="row"><span class="tag">${fin(l.since) ? 'D' + dayNo(l.since) : '?'}</span><span class="main">${esc(l.name)}</span><span class="sub">${fin(l.since) ? md(l.since) + ' 起' : ''}</span>${insBtn(`${l.name.replace(/[（(].*$/, '').trim() || l.name}${fin(l.since) ? ` since ${md(l.since)} (D${dayNo(l.since)})` : ''}`, l.name)}</li>`).join('');
+      h += tubes.map((l) => `<li class="row"><span class="tag">${fin(l.since) ? 'D' + dayNo(l.since) : '?'}</span><span class="main">${esc(l.name)}</span><span class="sub">${fin(l.since) ? md(l.since) + ' 起' : ''}</span>${insBtn(tubeLine(l), l.name)}</li>`).join('');
       h += '</ul>' + secClose;
       $('#col1').innerHTML = h;
     }
@@ -3594,13 +3608,13 @@ const PNW_VIEW = (() => {
     /* ---------- 第二欄：Lab ---------- */
     const COLW = 50, DELTAW = 46, INSW = 26;
     let LM = null;
-    const fmtGroup = (g, idxs) => {
+    const fmtGroup = (g, idxs, model) => {
       const rows = g.rows.filter((r) => !labHide.has(r.k) && idxs.some((i) => r.cells[i]));
       const dates = idxs.filter((i) => rows.some((r) => r.cells[i]));
       if (!rows.length || !dates.length) return '';
       const cw = rows.map((r) => Math.max(r.k.length, ...dates.map((i) => (r.cells[i] ? r.cells[i].v.length : 1))));
       const line = (label, get) => (label.padEnd(5) + rows.map((r, k) => '  ' + get(r).padEnd(cw[k])).join('')).replace(/\s+$/, '');
-      return [`#. ${g.name}`, line('', (r) => r.k), ...dates.map((i) => line(LM.cols[i].d, (r) => (r.cells[i] ? r.cells[i].v : '-')))].join('\n');
+      return [`#. ${g.name}`, line('', (r) => r.k), ...dates.map((i) => line((model || LM).cols[i].d, (r) => (r.cells[i] ? r.cells[i].v : '-')))].join('\n');
     };
     function renderCol2() {
       // 一欄 COLW 寬：算出放得下幾個抽血日（3–8 個）
@@ -3686,15 +3700,15 @@ const PNW_VIEW = (() => {
       const quiet = C.filter((c) => c.status === 'ng' && !c.pend.length);
       const label = (c) => esc(c.short);
       const cxNote = (c) => {
-        const day = `${+md(c.t).split('/')[0]}/${+md(c.t).split('/')[1]}`;
-        if (!c.e || (!c.e.orgs.length && !c.e.neg.length)) return `[${day}] ${c.short}: pending`;
-        if (!c.e.orgs.length) return `[${day}] ${c.short}: -`;
+        const day = md(c.t);
+        if (!c.e || (!c.e.orgs.length && !c.e.neg.length)) return `<${day}> ${c.short}: pending`;
+        if (!c.e.orgs.length) return `<${day}> ${c.short}: -`;
         const sens = c.e.sens.map((s) => { const pick = (k) => s.list.filter((x) => x.sir === k).map((x) => x.drug); return `  ${orgAbbr(s.org)}: S ${pick('S').join(', ') || '-'}; R ${pick('R').join(', ') || '-'}`; });
-        return [`[${day}] ${c.short}: ${c.e.orgs.map((o) => orgAbbr(o.name) + (o.mark ? ' (' + o.mark + ')' : '')).join('; ')}${c.pend.length || c.e.prelim ? ' (preliminary)' : ''}`, ...sens].join('\n');
+        return [`<${day}> ${c.short}: ${c.e.orgs.map((o) => orgAbbr(o.name) + (o.mark ? ' (' + o.mark + ')' : '')).join('; ')}${c.pend.length || c.e.prelim ? ' (preliminary)' : ''}`, ...sens].join('\n');
       };
       const ISO = isolates();
       const live = (M.abx || []).filter((a) => a.end == null);
-      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length ? insBtn(() => C.filter((c) => c.t > now() - 7 * DAY).sort((a, b) => a.t - b.t).map(cxNote).join('\n'), '#. Culture 近 7 天', 'Culture') : ''}`);
+      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length ? insBtn(() => C.filter((c) => c.t > now() - 7 * DAY).sort((a, b) => a.t - b.t).map(cxNote).join('\n'), '[Pathogen] 近 7 天的培養', 'Pathogen') : ''}`);
       h += stateNote('labs', '培養報告') + stateNote('pending', '未發送檢驗進度');
       if (live.length && ISO.length) {
         h += '<div class="cover">';
@@ -3760,7 +3774,7 @@ const PNW_VIEW = (() => {
 
       const pacs = (M.pacs || []).slice(0, 10);
       h += `${secOpen('pacs', '影像報告', `<span class="meta">${pacs.filter((p) => p.ms >= dayStart(B)).length} 份新的 · 點一列看全文</span>`)}${stateNote('pacs', '影像報告')}`;
-      h += pacs.map((r, i) => `<div class="rep"><div class="row"><span class="tag ${r.ms >= dayStart(B) ? 'rep' : ''}">${imgKind(r.title)}</span><button class="toggle" type="button" aria-expanded="false" data-rep="${i}"><span class="sub">${md(r.ms)}</span><span class="imp" title="${esc(r.title)}">${esc(r.imp.slice(0, 140) || r.title)}</span></button>${insBtn(`[${imgKind(r.title)}] ${new Date(r.ms).getFullYear()}/${md(r.ms)}: ${r.imp.slice(0, 600)}`, `${imgKind(r.title)} ${md(r.ms)}`)}</div><div class="full" hidden><b>${esc(r.title)}</b>\n${esc(r.body)}</div></div>`).join('');
+      h += pacs.map((r, i) => `<div class="rep"><div class="row"><span class="tag ${r.ms >= dayStart(B) ? 'rep' : ''}">${imgKind(r.title)}</span><button class="toggle" type="button" aria-expanded="false" data-rep="${i}"><span class="sub">${md(r.ms)}</span><span class="imp" title="${esc(r.title)}">${esc(r.imp.slice(0, 140) || r.title)}</span></button>${insBtn(`<${md(r.ms)}> ${r.title}: ${r.imp.slice(0, 600)}`, `${imgKind(r.title)} ${md(r.ms)}`)}</div><div class="full" hidden><b>${esc(r.title)}</b>\n${esc(r.body)}</div></div>`).join('');
       h += secClose;
 
       const nur = (M.nursing || []).filter((n) => n.ms > B).slice(0, 40);
@@ -3807,12 +3821,13 @@ const PNW_VIEW = (() => {
     /* ---------- 事件 ---------- */
     const dock = $('#dock');
     // 按插入鈕時不要把焦點從 HIS 的文字框搶走，游標才留在原位
-    dock.addEventListener('mousedown', (e) => { if (e.target.closest('.ib, #btnLabMerge')) e.preventDefault(); });
+    dock.addEventListener('mousedown', (e) => { if (e.target.closest('.ib, #btnLabMerge, #btnFill')) e.preventDefault(); });
     dock.addEventListener('click', (e) => {
       const t = e.target;
       const b = t.closest('[data-ins]');
       if (b) { const it = INS[+b.dataset.ins]; if (it) hooks.insert(typeof it.text === 'function' ? it.text() : it.text, it.label); return; }
       if (t.closest('#btnLabMerge')) { hooks.labMerge(); return; }
+      if (t.closest('#btnFill')) { hooks.fillAll(); return; }
       const fo = t.closest('[data-focus]'); if (fo) { focusRow(fo.dataset.focus); return; }
       const rg = t.closest('[data-range]');
       if (rg) {
@@ -3926,7 +3941,16 @@ const PNW_VIEW = (() => {
     new ResizeObserver(() => drawTimeline()).observe(plot);
 
     const debug = () => ({ geo: geo && { W: geo.W, t0: geo.t0, t1: geo.t1 }, ui: { ...ui }, now: now(), nowType: typeof M.now, base: base(), H, DAY, lanes: lanes().map((a) => [a.start, a.end]), plotW: $('#tlPlot').clientWidth });
-    return { debug, render, say, drawTimeline, labText: () => (M.labs && M.labs.summary ? M.labs.summary.text : ''), setHidden: (v) => { dock.hidden = v; $('#btnReopen').hidden = !v; }, setListPressed: (v) => $('#btnList').setAttribute('aria-pressed', String(v)) };
+    // 一鍵帶入用：上一篇之後的新抽血日，整理成 note 的表格文字（不受目前翻到哪一頁影響）
+    function labNewText() {
+      const page = ui.labPage; ui.labPage = 0;
+      let m; try { m = labModel(8); } finally { ui.labPage = page; }
+      if (!m || !m.newIdx.length) return { text: '', days: '' };
+      return { text: m.groups.map((g) => fmtGroup(g, m.newIdx, m)).filter(Boolean).join('\n'), days: m.newIdx.map((i) => m.cols[i].d).join('、') };
+    }
+    const vsOut = () => (curVs ? { text: curVs.text(), when: curVs.when } : { text: '', when: '' });
+    const tubesOut = () => { const t = M.tubes || []; return { text: t.map(tubeLine).join('\n'), n: t.length }; };
+    return { debug, render, say, drawTimeline, labNewText, vsText: vsOut, tubesText: tubesOut, labText: () => (M.labs && M.labs.summary ? M.labs.summary.text : ''), setHidden: (v) => { dock.hidden = v; $('#btnReopen').hidden = !v; }, setListPressed: (v) => $('#btnList').setAttribute('aria-pressed', String(v)) };
   }
   return { create, SHELL };
 })();
@@ -4082,22 +4106,33 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
   }
 
   /** 把 note 裡 [Lab] 最後日期之後的新結果補進去：同名表格接在下面，沒有的表格新增在 [Lab] 段尾 */
+  const hasLab = (t) => /^\s*\[Lab\]/im.test(t.value) && !t.readOnly && !t.disabled;
   function labMerge() {
     // 有 [Lab] 段的欄位優先（結構化 note 通常寫在 Assessment 裡）；都沒有就退回游標所在的欄位
-    const hasLab = (t) => /^\s*\[Lab\]/im.test(t.value) && !t.readOnly && !t.disabled;
     const focused = shown(picked) ? picked : null;
     const ta = (focused && hasLab(focused) ? focused : fields().find(hasLab)) || editor('[Lab]');
     if (!ta) return;
+    const r = labMergeInto(ta);
+    if (r.insert) { insert(r.insert, '新的 Lab（找不到 [Lab] 段，改插在游標處）'); return; }
+    // 培養與病原檢驗跟著 Lab 一起補，但寫在 [Pathogen] 段
+    const pa = datedMergeInto(ta, pathogenEntries(), PATHOGEN, ta.id !== ED);
+    const parts = [r.done.length ? '[Lab]：' + r.done.join('、') : '', pa.added || pa.updated || pa.moved ? '[Pathogen]：' + datedMsg(pa, '結果') : ''].filter(Boolean);
+    if (!parts.length) { view.say(r.why, 'warn'); return; }
+    view.say(`已補進${fieldName(ta) ? `「${fieldName(ta)}」` : ''} ${parts.join('；')}（Ctrl+Z 可復原；還沒存檔）`, 'done');
+  }
+  /** 把新結果併進 ta 的 [Lab] 段。回傳 { done: 補了哪些表, why: 沒補的原因, insert: 找不到 [Lab] 段時可另外插入的文字 }，不自己顯示訊息 */
+  function labMergeInto(ta) {
     const labText = view.labText();
-    if (!labText) { view.say('檢驗資料還沒載入，或近 14 天沒有檢驗', 'warn'); return; }
+    if (!labText) return { done: [], why: '檢驗資料還沒載入，或近 14 天沒有檢驗' };
     const now = new Date();
     const pacsAll = (M.pacs || []).map((p) => { const d = new Date(p.ms); return { day: (d.getMonth() + 1) * 100 + d.getDate(), title: p.title }; });
     const res = window.PNLab.process(labText, ta.value, (M.orders && M.orders.rows) || [], pacsAll, (now.getMonth() + 1) * 100 + now.getDate());
-    if (/^（/.test(res.text)) { view.say('note 的 [Lab] 已經是最新的，沒有可以補的結果', 'warn'); return; }
-    const sections = res.text.split(/\n(?=#\. )/).map((blk) => { const ls = blk.split('\n'); return { title: ls[0].replace(/^#\.\s*/, '').replace(/:\s*$/, ''), lines: ls.slice(1) }; });
+    // res.lab 只有檢驗表格；影像與培養另外由 datedMergeInto() 寫進 [Image]、[Pathogen] 段
+    if (!res.lab) return { done: [], why: '[Lab] 已經是最新的，沒有可以補的結果' };
+    const sections = res.lab.split(/\n(?=#\. )/).map((blk) => { const ls = blk.split('\n'); return { title: ls[0].replace(/^#\.\s*/, '').replace(/:\s*$/, ''), lines: ls.slice(1) }; });
     const lines = ta.value.replace(/\r/g, '').split('\n');
     const labAt = lines.findIndex((l) => /^\s*\[Lab\]/i.test(l));
-    if (labAt < 0) { insert(res.text, '新的 Lab（找不到 [Lab] 段，改插在游標處）'); return; }
+    if (labAt < 0) return { done: [], why: '找不到 [Lab] 段', insert: res.lab };
     const secEnd = () => { let e = labAt + 1; while (e < lines.length && !/^\s*\[[A-Za-z]/.test(lines[e]) && !/^\s*==/.test(lines[e])) e++; while (e > labAt + 1 && !lines[e - 1].trim()) e--; return e; };
     const done = [];
     for (const sec of sections) {
@@ -4144,13 +4179,194 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
       }
       done.push(sec.title);
     }
-    if (!done.length) { view.say('新的結果已經都在 [Lab] 裡了，沒有重複加入', 'warn'); return; }
+    if (!done.length) return { done: [], why: '新的結果已經都在 [Lab] 裡了' };
     const top = ta.scrollTop;
     typeInto(ta, 0, ta.value.length, lines.join('\n'));
     const at = lines.slice(0, labAt + 1).join('\n').length;
     ta.setSelectionRange(at, at); ta.scrollTop = top;
     pos.set(ta, { s: at, e: at });
-    view.say(`已補進${fieldName(ta) ? `「${fieldName(ta)}」的` : ''} [Lab]：${done.join('、')}（Ctrl+Z 可復原；還沒存檔）`, 'done');
+    return { done };
+  }
+
+  /* ---------- 一鍵帶入：把今天要更新的資料放進這篇 note 對應的地方 ---------- */
+  // 原則：只填空的地方、只加不刪。唯一會取代舊內容的情況是「那一段每一行都是 V/S 數值」
+  // （前一篇帶過來的舊數值，本來就要換掉）；夾了別的字就不動。
+  const VS_LINE = /^\s*(?:\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}\s+)?(?:T\s*[:：]|BP\s*[:：]|SpO2\s*[:：]|體重\s*[:：])/i;
+  const onlyVs = (text) => { const ls = text.split('\n').filter((l) => l.trim()); return ls.length > 0 && ls.every((l) => VS_LINE.test(l)); };
+  // 段落標題：[V/S]、[Lab]、[Image]… 或 ===Plan===。「[11/14] Sputum: …」這種日期開頭的是內容，不是標題
+  const SEC_HEAD = /^\s*(?:\[(?!\d{1,2}\/\d{1,2}\])[^\]\n]+\]|={2,})/;
+  /** 在 free note 裡找 [名稱] 段：內容是 lines[from..to)，不含段尾的空行 */
+  function block(lines, re) {
+    const head = lines.findIndex((l) => re.test(l));
+    if (head < 0) return null;
+    let to = head + 1; while (to < lines.length && !SEC_HEAD.test(lines[to])) to++;
+    while (to > head + 1 && !lines[to - 1].trim()) to--;
+    return { head, from: head + 1, to };
+  }
+  function setBlock(ta, lines, b, text) {
+    lines.splice(b.from, b.to - b.from, ...text.split('\n'));
+    const top = ta.scrollTop;
+    typeInto(ta, 0, ta.value.length, lines.join('\n'));
+    ta.scrollTop = top;
+  }
+  const linesOf = (ta) => ta.value.replace(/\r/g, '').split('\n');
+
+  /* ---------- 影像與病原：各自一段（[Image]、[Pathogen]），一筆一行「<MM/DD> 名稱: 結果」 ---------- */
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const mdOf = (ms) => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`; };
+  const normTitle = (s) => String(s).replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
+  const DATED = /^\s*[\[<](\d{1,2})\/(\d{1,2})[\]>]\s*(.*)$/;      // 新寫法 <11/10>；也認得舊寫法 [11/10]
+  const dayKey = (md) => { const m = String(md).match(/(\d{1,2})\/(\d{1,2})/); return m ? +m[1] * 100 + +m[2] : -1; };
+  const numOf = (ms) => { const d = new Date(ms); return (d.getMonth() + 1) * 100 + d.getDate(); };
+  const pacsDays = () => (M.pacs || []).map((p) => ({ day: numOf(p.ms), title: p.title }));
+  const sinceMs = () => HIS.dayStart(fin(M.base) ? M.base : (+new Date()) - DAY);
+  const pnProcess = (labText) => window.PNLab.process(labText || '', '', (M.orders && M.orders.rows) || [], pacsDays(), numOf(+new Date()));
+  /** 上一篇之後已出報告的影像，加上近 10 天有醫囑但還沒報告的 */
+  function imageEntries() {
+    const out = (M.pacs || []).filter((p) => p.ms >= sinceMs()).map((p) => ({ md: mdOf(p.ms), title: p.title, text: (p.imp || '').slice(0, 600) || '(no report text)', pending: false, fresh: true }));
+    for (const e of pnProcess('').image) out.push({ md: e.md, title: e.title, text: 'pending', pending: true, fresh: true });
+    return out.sort((x, y) => dayKey(x.md) - dayKey(y.md));
+  }
+  /** 培養與病原檢驗（含流感、新冠快篩）：近 14 天的結果與還沒發的。
+   *  fresh（值得新增一行）＝還在 pending、上一篇之後才採檢，或採檢較早但上一篇之後才發報告（培養常常隔幾天才有結果） */
+  function pathogenEntries() {
+    const since = numOf(sinceMs()), out = [];
+    const base = fin(M.base) ? M.base : (+new Date()) - DAY;
+    const lateDays = new Set((M.micro || []).filter((e) => fin(e.reported) && e.reported > base && fin(e.t)).map((e) => numOf(e.t)));
+    for (const e of pnProcess(view.labText()).pathogen) {
+      const text = String(e.res || '').trim() || '-', pending = /^pending$/i.test(text);
+      out.push({ md: e.md, title: String(e.label).trim(), text, pending, fresh: pending || e.day >= since || lateDays.has(e.day) });
+    }
+    return out.sort((x, y) => dayKey(x.md) - dayKey(y.md));
+  }
+  const IMAGE = {
+    name: '[Image]', head: /^\s*\[Images?\]/i, legacy: /^#\.\s*Image:?\s*$/i, after: [/^\s*\[Lab\]/i],
+    blockIf: /^\s*\[(?:CXR|CT|MRI|KUB|X-?ray|Echo|Sono)\b[^\]]*\]/i, blocked: 'note 用的是 [CXR] 這類段落，沒有 [Image] 段',
+    none: '上一篇之後沒有新的影像', same: '[Image] 已經是最新的', noAnchor: 'note 裡沒有 [Lab] 段可以接',
+  };
+  const PATHOGEN = {
+    name: '[Pathogen]', head: /^\s*\[Pathogens?\]/i, legacy: /^#\.\s*Culture:?\s*$/i, after: [/^\s*\[(?:Abx|Antibiotics?)\]/i, /^\s*\[Lab\]/i], loose: true,
+    none: '上一篇之後沒有新的培養或病原檢驗', same: '[Pathogen] 已經是最新的', noAnchor: 'note 裡沒有 [Abx] 或 [Lab] 段可以接',
+  };
+  /**
+   * 把 entries 併進 spec 那一段，沒有就新增（接在 spec.after 第一個找得到的段落後面；endOk 時可以放最後）。
+   * 只加行。會改到既有文字的只有三種，內容都不會少：
+   *   1. 原本寫 pending、現在有結果的那一行，換成結果；
+   *   2. 舊寫法的日期 [MM/DD] 換成 <MM/DD>；
+   *   3. 舊版放在 [Lab] 底下的「#. Culture:」「#. Image:」，整段都是日期開頭的行時，搬進這一段。
+   * 回傳 { added, updated, moved, why }
+   */
+  function datedMergeInto(ta, entries, spec, endOk) {
+    const lines = linesOf(ta);
+    const fresh = entries.filter((en) => en.fresh);
+    const legacyAt = () => lines.findIndex((l) => spec.legacy.test(l.trim()));
+    let li = legacyAt(), le = li;
+    if (li >= 0) { le = li + 1; while (le < lines.length && DATED.test(lines[le])) le++; }
+    const next = li >= 0 ? lines[le] : undefined;
+    const movable = li >= 0 && le > li + 1 && (next === undefined || !next.trim() || SEC_HEAD.test(next) || /^#\./.test(next.trim()));
+    let b = block(lines, spec.head);
+    if (!b) {
+      if (!fresh.length && !movable) return { added: 0, updated: 0, moved: 0, why: spec.none };
+      if (spec.blockIf && lines.some((l) => spec.blockIf.test(l))) return { added: 0, updated: 0, moved: 0, why: spec.blocked };
+      if (!spec.after.some((re) => block(lines, re)) && !endOk) return { added: 0, updated: 0, moved: 0, why: spec.noAnchor };
+    }
+    // 先把舊寫法那一段拿出來（之後原封不動放進新的段落，只換日期的括號）
+    let carried = [];
+    if (movable) carried = lines.splice(li, le - li).slice(1);
+    // 沒搬走的舊段落（夾了別的字）：留在原地，但比對重複時要算進去
+    const stay = []; li = legacyAt();
+    if (li >= 0) for (let i = li + 1; i < lines.length && !SEC_HEAD.test(lines[i]) && !/^#\./.test(lines[i].trim()); i++) stay.push(lines[i]);
+    b = block(lines, spec.head);
+    if (!b) {
+      let at = lines.length; while (at > 0 && !lines[at - 1].trim()) at--;
+      for (const re of spec.after) { const x = block(lines, re); if (x) { at = x.to; break; } }
+      lines.splice(at, 0, spec.name);
+      b = { head: at, from: at + 1, to: at + 1 };
+    }
+    let moved = 0, reformatted = 0;
+    for (const l of carried) { lines.splice(b.to, 0, l.replace(/^(\s*)\[(\d{1,2}\/\d{1,2})\]/, '$1<$2>')); b.to++; moved++; }
+    for (let i = b.from; i < b.to; i++) { const n = lines[i].replace(/^(\s*)\[(\d{1,2}\/\d{1,2})\]/, '$1<$2>'); if (n !== lines[i]) { lines[i] = n; reformatted++; } }
+    const same = (line, en) => {
+      const m = line.match(DATED); if (!m || +m[1] * 100 + +m[2] !== dayKey(en.md)) return false;
+      const have = normTitle(m[3]), want = normTitle(en.title), label = have.split(':')[0];
+      return have.startsWith(want) || (!!spec.loose && label.length >= 3 && want.startsWith(label));
+    };
+    let added = 0, updated = 0;
+    for (const en of entries) {
+      const line = `<${en.md}> ${en.title}: ${en.text}`;
+      let hit = -1; for (let i = b.from; i < b.to; i++) if (same(lines[i], en)) { hit = i; break; }
+      if (hit < 0) { if (en.fresh && !stay.some((l) => same(l, en))) { lines.splice(b.to, 0, line); b.to++; added++; } }
+      else if (!en.pending && /pending\)?\s*$/i.test(lines[hit].trim())) { lines[hit] = line; updated++; }
+    }
+    if (!added && !updated && !moved && !reformatted) return { added: 0, updated: 0, moved: 0, why: fresh.length || b.to > b.from ? spec.same : spec.none };
+    const top = ta.scrollTop;
+    typeInto(ta, 0, ta.value.length, lines.join('\n'));
+    ta.scrollTop = top;
+    return { added, updated, moved: moved + reformatted };
+  }
+  const datedMsg = (r, what) => [r.added ? '新增 ' + r.added + ' 筆' : '', r.updated ? r.updated + ' 筆 pending 換成' + what : '', r.moved ? '改成新寫法 ' + r.moved + ' 行' : ''].filter(Boolean).join('、');
+  function fillAll() {
+    const all = fields().filter((t) => !t.readOnly && !t.disabled);
+    if (!all.length) { view.say('還沒有開啟可以編輯的 note：先在左邊清單選一篇，或按 HIS 的新增按鈕', 'warn'); return; }
+    if (['tpr', 'labs', 'tubes'].some((k) => M.loading.has(k))) { view.say('資料還在載入，等狀態列顯示「資料已更新」再按一次', 'warn'); return; }
+    const by = (re) => all.find((t) => re.test(t.id));
+    const free = all.find((t) => t.id === ED);
+    const nm = (t) => fieldName(t) || 'note';
+    const done = [], skip = [];
+    const vs = view.vsText(), tubes = view.tubesText();
+
+    // 1. V/S：free note 的 [V/S] 段；結構化 Progress 的 Objective（On-service 是 Physical Exam and Assessment）
+    if (!vs.text) skip.push('V/S：沒有生命徵象資料');
+    else if (free) {
+      const lines = linesOf(free), b = block(lines, /^\s*\[V\/S\]/i);
+      const cur = b ? lines.slice(b.from, b.to).join('\n') : '';
+      if (!b) skip.push('V/S：note 裡沒有 [V/S] 段');
+      else if (cur.trim() === vs.text.trim()) skip.push('V/S：已經是這組數值');
+      else if (!cur.trim() || onlyVs(cur)) { setBlock(free, lines, b, vs.text); done.push(`[V/S]（${cur.trim() ? '換成' : '填入'}${vs.when}）`); }
+      else skip.push('V/S：[V/S] 段有數值以外的內容');
+    } else {
+      const o = by(/txbObject$/) || by(/PhysicalExamAndAssessment$/);
+      if (!o) skip.push('V/S：這種 note 沒有放生命徵象的欄位');
+      else if (o.value.trim() === vs.text.trim()) skip.push(`V/S：${nm(o)} 已經是這組數值`);
+      else if (!o.value.trim() || onlyVs(o.value)) { const was = o.value.trim(); typeInto(o, 0, o.value.length, vs.text); done.push(`${nm(o)}（${was ? '換成' : '填入'}${vs.when}的 V/S）`); }
+      else skip.push(`V/S：${nm(o)} 已有其他內容`);
+    }
+
+    // 2. 管路：只填空的。free note 的 [Tube] 段通常有手寫的細節，有內容就不動也不提
+    if (tubes.text) {
+      if (free) {
+        const lines = linesOf(free), b = block(lines, /^\s*\[(?:Tubes?|Lines?|Catheters?|管路)\]/i);
+        if (b && !lines.slice(b.from, b.to).join('').trim()) { setBlock(free, lines, b, tubes.text); done.push(`[Tube]（${tubes.n} 條）`); }
+      } else {
+        const c = by(/BSIBundle$/);
+        if (c && !c.value.trim()) { typeInto(c, 0, 0, tubes.text); done.push(`${nm(c)}（管路 ${tubes.n} 條）`); }
+        else if (c) skip.push(`管路：${nm(c)} 已有內容`);
+      }
+    }
+
+    // 3. Lab：有 [Lab] 段就把新結果接在既有表格後面；結構化 note 沒有 [Lab] 段時，在 Assessment 最後加一段
+    const target = free || by(/txbAssessment\d+$/);
+    if (!target) skip.push('Lab：找不到 Assessment 欄');
+    else if (hasLab(target)) {
+      const r = labMergeInto(target);
+      if (r.done.length) done.push(`${free ? '' : nm(target) + ' 的 '}[Lab]（${r.done.join('、')}）`); else skip.push('Lab：' + r.why);
+    } else {
+      const lab = view.labNewText();
+      if (!lab.text) skip.push('Lab：上一篇之後沒有新的抽血結果');
+      else if (free) skip.push('Lab：note 裡沒有 [Lab] 段');
+      else { const v = target.value; typeInto(target, v.length, v.length, (v && !v.endsWith('\n') ? '\n' : '') + '[Lab]\n' + lab.text + '\n'); done.push(`${nm(target)}（新增 [Lab] ${lab.days}）`); }
+    }
+
+    // 4. 影像、5. 病原：跟 Lab 同一個欄位，各自一段。[Image] 接在 [Lab] 後面；[Pathogen] 接在 [Abx] 後面，沒有 [Abx] 就接在 [Lab] 後面
+    if (target) {
+      const pre = free ? '' : nm(target) + ' 的 ';
+      const im = datedMergeInto(target, imageEntries(), IMAGE, !free);
+      if (im.added || im.updated || im.moved) done.push(`${pre}[Image]（${datedMsg(im, '報告')}）`); else skip.push('影像：' + im.why);
+      const pa = datedMergeInto(target, pathogenEntries(), PATHOGEN, !free);
+      if (pa.added || pa.updated || pa.moved) done.push(`${pre}[Pathogen]（${datedMsg(pa, '結果')}）`); else skip.push('病原：' + pa.why);
+    }
+
+    view.say((done.length ? '已帶入：' + done.join('；') : '沒有可以帶入的內容') + (skip.length ? '｜沒動：' + skip.join('；') : '') + (done.length ? '（Ctrl+Z 可復原；還沒存檔）' : ''), done.length ? 'done' : 'warn');
   }
 
   /* ---------- 抓資料 ---------- */
@@ -4233,7 +4449,7 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
   }
 
   const view = PNW_VIEW.create(root, M, {
-    insert, labMerge,
+    insert, labMerge, fillAll,
     reload: () => load(),
     needVitals: (days) => need('vit', days, ['tpr', 'io'], '生命徵象與 I/O'),
     needLabs: (days) => need('lab', days, ['labs'], '檢驗'),
@@ -4269,7 +4485,7 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
     document.documentElement.classList.remove('pnw-on', 'pnw-nolist');
     document.documentElement.style.removeProperty('--pnw-w');
   };
-  window.__pnw = { M, destroy, src: () => S, reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.3.1' };
+  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.5.1' };
 })();
 
 })();

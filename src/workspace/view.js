@@ -24,7 +24,7 @@ const PNW_VIEW = (() => {
 <button class="reopen" type="button" id="btnReopen" hidden>工作畫面</button>
 <div class="dock" id="dock">
   <div class="bar">
-    <b id="barBed"></b><span class="dim" id="barWho"></span>
+    <b id="barBed"></b><span class="iso" id="barIso" hidden></span><span class="dim" id="barWho"></span>
     <label class="dim" for="baseSel">上一篇</label><select id="baseSel" title="「自上一篇以來」要從哪一篇 note 算起"></select>
     <div class="seg" role="group" aria-label="時間軸範圍"><button type="button" data-range="24">24h</button><button type="button" data-range="72" aria-pressed="true">3 天</button><button type="button" data-range="168">7 天</button><button type="button" data-range="custom" title="自己指定時間軸要看幾天">自訂</button></div>
     <label class="range-n" id="rangeBox" hidden><input type="number" id="rangeDays" min="1" max="60" step="1" value="14" aria-label="時間軸天數"> 天</label>
@@ -169,7 +169,12 @@ const PNW_VIEW = (() => {
         const rows = order.map((k) => { const it = blood.get(k); if (!it) return null; used.add(k); return rowOf(s.blood, it); }).filter(Boolean);
         if (rows.length) groups.push({ name: title, rows });
       }
-      const rest = s.blood.items.filter((it) => !used.has(it.name) && !CX_ITEM.test(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
+      const PL = window.PNLab || {};
+      const isDrug = (n) => !!(PL.drugOf && PL.drugOf(n));
+      const restItems = s.blood.items.filter((it) => !used.has(it.name) && !CX_ITEM.test(it.name) && !(PL.isPathogenCol && PL.isPathogenCol(it.name)));
+      const drugRows = restItems.filter((it) => isDrug(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
+      if (drugRows.length) groups.push({ name: 'Drug', rows: drugRows });
+      const rest = restItems.filter((it) => !isDrug(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
       if (rest.length) groups.push({ name: 'Others', rows: rest });
       for (const { name, set } of sets.slice(1)) {
         const rows = set.items.map((it) => rowOf(set, it)).filter(Boolean);
@@ -616,7 +621,21 @@ const PNW_VIEW = (() => {
       if (quiet.length) h += `<div class="sub-h">沒長<span>${quiet.length} 份</span><span class="sp" style="flex:1"></span><button class="linkbtn" type="button" id="btnQuiet" aria-expanded="${ui.quiet}">${ui.quiet ? '收合' : '顯示'}</button></div><ul id="quietList" ${ui.quiet ? '' : 'hidden'}>${quiet.map(cxRow).join('')}</ul>`;
       const others = (M.pending || []).map((p) => ({ p, items: p.items.filter((x) => !CX_ITEM.test(x.name)) })).filter((x) => x.items.length);
       if (others.length) h += `<div class="sub-h">其他未發檢驗<span>${others.length} 份檢體</span></div><ul>${others.map(({ p, items }) => `<li class="row"><span class="tag pending">未發</span><span class="main">${esc(items.map((x) => x.name).join('、'))} <span class="dose">${esc(p.spec)}</span></span><span class="sub">${fin(p.t) ? md(p.t) + ' ' + hm(p.t) : ''}</span>${insBtn(`${items.map((x) => x.name).join(', ')}: pending`, items[0].name)}</li>`).join('')}</ul>`;
-      if (!C.length && !others.length && !M.loading.has('labs') && !M.err.labs) h += '<p class="note">近 14 天沒有培養或未發的檢驗。</p>';
+      // 病原檢驗：Multiplex PCR、流感與新冠快篩、抹片染色。不是培養，但寫 note 時同樣放 [Pathogen]
+      let ptests = [];
+      try {
+        const d = new Date(now());
+        if (window.PNLab && M.labs && M.labs.summary) ptests = window.PNLab.process(M.labs.summary.text || '', '', (M.orders && M.orders.rows) || [], [], (d.getMonth() + 1) * 100 + d.getDate()).pathogen.filter((e) => !/\/C$|^Cul$/.test(e.label));
+      } catch (e) { /* 這一小段出錯不影響其他內容 */ }
+      if (ptests.length) {
+        h += `<div class="sub-h">病原檢驗<span>PCR、快篩、染色 · ${ptests.length} 筆</span></div><ul>`;
+        h += ptests.slice().reverse().map((e) => {
+          const pend = /^pending$/i.test(e.res), pos = !pend && e.res !== '-' && !/negative|^neg\b|not detected/i.test(e.res);
+          return `<li class="row"><span class="tag ${pend ? 'pending' : pos ? 'grown' : ''}">${pend ? '未發' : pos ? '陽性' : '陰性'}</span><span class="main">${esc(e.label)} <span class="${pos ? 'org' : 'dose'}">${esc(pend || e.res === '-' ? '' : e.res)}</span></span><span class="sub">${esc(e.md)}</span>${insBtn(`<${e.md}> ${e.label}: ${e.res}`, `${e.label} ${e.md}`)}</li>`;
+        }).join('');
+        h += '</ul>';
+      }
+      if (!C.length && !others.length && !ptests.length && !M.loading.has('labs') && !M.err.labs) h += '<p class="note">近 14 天沒有培養或未發的檢驗。</p>';
       if (ISO.length) {
         const cols = ISO.slice(0, 4);
         const drugs = [];
@@ -652,10 +671,33 @@ const PNW_VIEW = (() => {
       $('#col3').innerHTML = h;
     }
 
+    /* ---------- 隔離：從醫囑清單找「…隔離-XXX」。新增算開始；刪除，或另開一筆「取消「…隔離…」」算解除 ---------- */
+    function isolations() {
+      const items = ((M.orders && M.orders.items) || []).slice().sort((a, b) => a.ms - b.ms);
+      const on = new Map();
+      const key = (s) => s.replace(/\s+/g, '');
+      for (const o of items) {
+        const nm = String(o.name || '').replace(/\s*\((?:Frequency|細項)[\s\S]*$/, '').replace(/\s*特殊醫囑.*$/, '').trim();
+        if (!/隔離/.test(nm)) continue;
+        const cancel = nm.match(/^(?:取消|解除)\s*[「『"]?(.*?隔離[^」』"]*)[」』"]?$/);
+        if (cancel) { on.delete(key(cancel[1])); continue; }
+        if (/刪除/.test(o.act)) { on.delete(key(nm)); continue; }
+        const m = nm.match(/隔離\s*[-－–]\s*(.+)$/);
+        // 「空氣隔離-TB」→ TB；沒有後綴的「庫賈氏症隔離」「防蚊隔離」「飛沫隔離」→ 隔離兩字前面那一段
+        const label = (m ? m[1] : nm.replace(/隔離.*$/, '')).replace(/[,，、\s]+$/, '').trim() || nm;
+        on.set(key(nm), { label, full: nm, since: o.ms });
+      }
+      return [...on.values()];
+    }
+
     /* ---------- 工具列 ---------- */
     function renderBar() {
       $('#barBed').textContent = M.P.bed || '';
       $('#barWho').textContent = [M.P.sex, M.P.age, M.P.chart].filter(Boolean).join(' · ');
+      const iso = isolations(), isoEl = $('#barIso');
+      isoEl.hidden = !iso.length;
+      isoEl.innerHTML = iso.length ? '<span>隔離</span>' + iso.map((i) => `<b title="${esc(i.full)}（${md(i.since)} 開立）">${esc(i.label)}</b>`).join('') : '';
+      isoEl.title = iso.length ? '依醫囑清單裡的隔離醫囑判斷：' + iso.map((i) => i.full).join('、') : '';
       const sel = $('#baseSel');
       const notes = M.notes || [];
       sel.innerHTML = notes.length ? notes.map((n) => `<option value="${n.ms}" ${n.ms === M.base ? 'selected' : ''}>${md(n.ms)} ${hm(n.ms)} ${esc(n.title.slice(0, 16))}</option>`).join('') + `<option value="${now() - DAY}" ${notes.some((n) => n.ms === M.base) ? '' : 'selected'}>近 24 小時</option>` : '<option>近 24 小時</option>';

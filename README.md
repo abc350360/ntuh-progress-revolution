@@ -7,6 +7,8 @@
 ## 功能與設計
 
 - 內容：生命徵象、I/O、抗生素、培養共用一條時間軸；「自上一篇以來」的醫囑變動與 PRN；目前用藥；I/O 與體重；管路；Lab 表格（預設近 10 天，天數可改；欄位放不下時用 ‹ › 翻頁）；培養、未發報告與藥敏對照；影像報告；護理紀錄；護理交班。
+- 隔離：工具列床號旁邊會標出這位病人目前的隔離，例如「隔離 MRSA VRE」。來源是醫囑清單裡的隔離醫囑：「空氣隔離-TB」取 TB、「接觸隔離-VRE」取 VRE，沒有後綴的（庫賈氏症隔離、防蚊隔離、飛沫隔離）取「隔離」前面那一段。開立算開始；被刪除，或另開一筆「取消「…隔離…」」算解除。滑鼠停上去看完整名稱與開立日。
+- Lab 表格的分組：藥物濃度（Tacrolimus、Sirolimus、Everolimus/Certican、Vancomycin、Digoxin 等）自成一組 `Drug`。Multiplex PCR panel 的各個目標和抹片染色不放在 Lab 表格，改列在第三欄的「病原檢驗」（連同流感、新冠快篩），寫進 note 時屬於 `[Pathogen]`，例如 `<11/14> Pneumonia PCR: Haemophilus influenzae >=1.0E+07 copies/mL`，全陰性寫 `-`。
 - 每個區塊標題左邊有展開／收合鈕。預設收合：自上一篇以來、護理紀錄、護理交班。Lab 的「項目」可以勾選要顯示哪些檢驗項目（預設只隱藏 eGFR），隱藏的項目插入時也不會帶入。這兩項設定記在瀏覽器的 localStorage（`pnw.fold`、`pnw.labHide`），所有病人共用。
 - 每一列都有「插入」鈕，把文字插到 HIS 原生文字框的游標處。「補進 [Lab]」會把 note 裡 [Lab] 最後日期之後的新結果接到既有表格下面（用 `PNLab.process`）；只會加行，不會刪掉或改寫原有內容。
 - 插入的目標欄位：
@@ -33,7 +35,7 @@
 - 院外測試：`prototype/his-mock/InsertProgressNoteContent.aspx/` 是模擬病程頁（假資料），用專案根目錄起一個靜態伺服器後開
   `http://localhost:8770/prototype/his-mock/InsertProgressNoteContent.aspx/?SESSION=MOCK&AccountIDSE=26T00000000&PersonID=A000000000`。
   網址加 `&kind=progress` 是結構化 Progress note 的版面，加 `&kind=none` 是還沒開任何 note。
-- 狀態（2026-11-16，v0.5.1）：在 HIS 病程頁實測過資料載入、時間軸（含自訂天數、點選時間點）、版面嵌入（Free note 與 Weekly Summary 表單）、收合、Lab 天數與翻頁、護理交班、抗生素查整個住院期間、多天生命徵象與病人比對。**還沒在 HIS 上測**：所有會寫進文字框的動作——插入、「補進 [Lab]」、一鍵帶入——都只在模擬頁測過（欄位 id 是從 HIS 讀來的）。
+- 狀態（2026-11-17，v0.6.0）：在 HIS 病程頁實測過資料載入、時間軸（含自訂天數、點選時間點）、版面嵌入（Free note 與 Weekly Summary 表單）、收合、Lab 天數與翻頁、護理交班、抗生素查整個住院期間、多天生命徵象與病人比對。**還沒在 HIS 上測**：所有會寫進文字框的動作——插入、「補進 [Lab]」、一鍵帶入——都只在模擬頁測過（欄位 id 是從 HIS 讀來的）。
 - 安裝與更新：專案根目錄起靜態伺服器後，在裝有 Tampermonkey 的瀏覽器開 `http://localhost:8770/dist/pn-workspace.user.js`，Tampermonkey 會跳出安裝／更新頁。
 - `prototype/index.html` 是最初的版面原型（純假資料）。
 

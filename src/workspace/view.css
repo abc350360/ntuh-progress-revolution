@@ -286,3 +286,8 @@ tbody tr { border-top: 1px solid var(--line-soft); }
 .dock.narrow .bar-btn.primary { padding: 0 9px; }
 /* 窄版的狀態訊息自己一行：一鍵帶入的結果比較長，讓它最多排兩行 */
 .dock.narrow .bar .status { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+
+/* 隔離：床號旁邊，要一眼看得到 */
+.iso { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 7px; border-radius: 5px; background: #8a2330; color: #fff; font-size: 12px; white-space: nowrap; }
+.iso[hidden] { display: none; }
+.iso b { font-size: 12.5px; font-weight: 650; padding: 0 5px; border-radius: 3px; background: rgba(255, 255, 255, .18); line-height: 19px; }

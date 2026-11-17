@@ -38,7 +38,7 @@
 - 院外測試：`prototype/his-mock/InsertProgressNoteContent.aspx/` 是模擬病程頁（假資料），用專案根目錄起一個靜態伺服器後開
   `http://localhost:8770/prototype/his-mock/InsertProgressNoteContent.aspx/?SESSION=MOCK&AccountIDSE=26T00000000&PersonID=A000000000`。
   網址加 `&kind=progress` 是結構化 Progress note 的版面，加 `&kind=none` 是還沒開任何 note。
-- 狀態（2026-11-17）：v0.6.0 在 HIS 病程頁實測過資料載入、時間軸（含自訂天數、點選時間點）、版面嵌入（Free note 與 Weekly Summary 表單）、收合、Lab 天數與翻頁、護理交班、抗生素查整個住院期間、多天生命徵象與病人比對。v0.6.1 已在 Ego-lite 的兩個 HIS 病程案例唯讀確認：Acinetobacter 名稱變體移出 Lab、肺炎 PCR 摘要保留陽性病原、Sp/C 顯示，以及 A gas／V gas 與 LA 的結果比對不再誤列 pending；前後全部 145 個 textarea 內容均相同。Pancreas 因這兩個案例沒有相關結果，仍只以假資料驗證。Ego-lite 已安裝 v0.6.1，重新讀回的腳本與建置檔完全相同。v0.6.2 在同兩類 HIS 案例注入 console 版唯讀確認：隔日才留檢體的 stool O.B. 與 `P (STAT)` 不再出現 pending，前後 145 個 textarea 內容相同；Ego-lite 的 Tampermonkey 仍是 v0.6.1。所有會寫進文字框的動作仍只在模擬頁測過，真實 HIS 上不操作。
+- 狀態（2026-11-17）：v0.6.0 在 HIS 病程頁實測過資料載入、時間軸（含自訂天數、點選時間點）、版面嵌入（Free note 與 Weekly Summary 表單）、收合、Lab 天數與翻頁、護理交班、抗生素查整個住院期間、多天生命徵象與病人比對。v0.6.1 已在 Ego-lite 的兩個 HIS 病程案例唯讀確認：Acinetobacter 名稱變體移出 Lab、肺炎 PCR 摘要保留陽性病原、Sp/C 顯示，以及 A gas／V gas 與 LA 的結果比對不再誤列 pending；前後全部 145 個 textarea 內容均相同。Pancreas 因這兩個案例沒有相關結果，仍只以假資料驗證。Ego-lite 已安裝 v0.6.1，重新讀回的腳本與建置檔完全相同。v0.6.2 在同兩類 HIS 案例注入 console 版唯讀確認：隔日才留檢體的 stool O.B. 與 `P (STAT)` 不再出現 pending，前後 145 個 textarea 內容相同；Ego-lite 的 Tampermonkey 已更新為 v0.6.2，讀回與建置檔完全相同。所有會寫進文字框的動作仍只在模擬頁測過，真實 HIS 上不操作。
 - 安裝與更新：專案根目錄起靜態伺服器後，在裝有 Tampermonkey 的瀏覽器開 `http://localhost:8770/dist/pn-workspace.user.js`，Tampermonkey 會跳出安裝／更新頁。
 - `prototype/index.html` 是最初的版面原型（純假資料）。
 

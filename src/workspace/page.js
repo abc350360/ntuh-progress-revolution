@@ -527,5 +527,5 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
     document.documentElement.classList.remove('pnw-on', 'pnw-nolist');
     document.documentElement.style.removeProperty('--pnw-w');
   };
-  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.6.1' };
+  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.6.2' };
 })();

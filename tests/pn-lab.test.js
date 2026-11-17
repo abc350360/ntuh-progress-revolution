@@ -77,3 +77,60 @@ test('既有 pending 對應正常且不變更 ECG 排除、Drug 與肝凝血分�
   assert.doesNotMatch(r.lab, /pending|ECG|Others/);
   assert.match(r.lab, /#. Drug/);
 });
+
+test('stool OB 隔日才採到檢體：保留報告採檢日並解除前一日 pending', () => {
+  const r = run(table('Stool', ['O.B.'], ['1+'], '11/17'), [order('Occult blood(o-tolidine) (Specimen:STO)')]);
+  assert.doesNotMatch(r.lab, /pending|Others/);
+  assert.match(r.lab, /11\/17\s+1\+/);
+  assert.doesNotMatch(r.lab, /11\/16/);
+});
+
+test('P 與 P (STAT) 對應同日 Renal & e- 的 P', () => {
+  for (const name of ['P', 'P (STAT) (Specimen:BLO)']) {
+    const r = run(table('Electrolytes', ['P'], ['3.4'], '11/17'), [order(name, 1117)]);
+    assert.doesNotMatch(r.lab, /pending|Others/);
+    assert.match(r.lab, /Renal & e-/);
+  }
+});
+
+test('stool OB 真正沒報告時仍在 Stool 標 pending', () => {
+  const r = run('', [order('Occult blood(o-tolidine) (Specimen:STO)')]);
+  assert.match(r.lab, /#. Stool\n11\/16\s+pending \(OB\)/);
+  assert.doesNotMatch(r.lab, /Others/);
+});
+
+test('同份隔日 stool 報告不能同時完成兩天各開的一筆 OB', () => {
+  const r = run(table('Stool', ['OB'], ['1+'], '11/17'), [order('Occult blood(o-tolidine) (Specimen:STO)'), order('Occult blood(o-tolidine) (Specimen:STO)', 1117)]);
+  assert.match(r.lab, /11\/16\s+pending \(OB\)/);
+  assert.doesNotMatch(r.lab, /11\/17\s+pending/);
+});
+
+test('兩個以上舊日期或其他 stool 項目不會被較晚 OB 結果任意解除', () => {
+  const old = run(table('Stool', ['OB'], ['1+'], '11/17'), [order('Occult blood(o-tolidine) (Specimen:STO)', 1114)]);
+  assert.match(old.lab, /11\/14\s+pending/);
+  const other = run(table('Stool', ['WBC'], ['2-3'], '11/17'), [order('Occult blood(o-tolidine) (Specimen:STO)')]);
+  assert.match(other.lab, /11\/16\s+pending/);
+});
+
+test('以前的 OB 報告不能完成新的醫囑；月末隔日仍能比對', () => {
+  const earlier = run(table('Stool', ['OB'], ['1+']), [order('Occult blood (Specimen:STO)', 1117)]);
+  assert.match(earlier.lab, /11\/17\s+pending/);
+  const monthEnd = PNLab.process(table('Stool', ['OB'], ['1+'], '12/01'), '', [order('Occult blood (Specimen:STO)', 1130)], [], 1201);
+  assert.doesNotMatch(monthEnd.lab, /pending/);
+  assert.match(monthEnd.lab, /12\/01\s+1\+/);
+});
+
+test('Stool O.B. 寫法也算潛血；名稱裡碰巧有 ob 的 stool 檢查不算', () => {
+  const ob = run(table('Stool', ['O.B.'], ['1+'], '11/17'), [order('Stool O.B. (Specimen:STO)')]);
+  assert.doesNotMatch(ob.lab, /pending/);
+  const other = run('', [order('Stool microbiology screen (Specimen:STO)')]);
+  assert.doesNotMatch(other.lab, /#. Stool/);
+});
+
+test('P 真正缺結果時仍標在 Renal & e-；不誤認 PCT 或 PTT', () => {
+  const r = run(table('Electrolytes', ['Na'], ['139'], '11/17'), [order('P (STAT) (Specimen:BLO)', 1117)]);
+  const group = PNLab.parse(r.lab).find(g => g.name === 'Renal & e-');
+  assert.equal(group?.rows[0].vals.P, 'pending');
+  const other = run('', [order('Procalcitonin', 1117), order('PTT', 1117)]);
+  assert.doesNotMatch(other.lab, /Renal & e-/);
+});

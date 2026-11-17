@@ -10,6 +10,7 @@
 - 隔離：工具列床號旁邊會標出這位病人目前的隔離，例如「隔離 MRSA VRE」。來源是醫囑清單裡的隔離醫囑：「空氣隔離-TB」取 TB、「接觸隔離-VRE」取 VRE，沒有後綴的（庫賈氏症隔離、防蚊隔離、飛沫隔離）取「隔離」前面那一段。開立算開始；被刪除，或另開一筆「取消「…隔離…」」算解除。滑鼠停上去看完整名稱與開立日。
 - Lab 表格的分組：藥物濃度（Tacrolimus、Sirolimus、Everolimus/Certican、Vancomycin、Digoxin 等）自成一組 `Drug`。Multiplex PCR panel 的各個目標和抹片染色不放在 Lab 表格，改列在第三欄的「病原檢驗」（連同流感、新冠快篩），寫進 note 時屬於 `[Pathogen]`，例如 `<11/14> Pneumonia PCR: Haemophilus influenzae >=1.0E+07 copies/mL`，全陰性寫 `-`。
 - Amylase（AMY）與 lipase（Lip）在血液 Lab 自成 `Pancreas`；體液的 AMY 留在原檢體分組。Blood gas 醫囑依當日 `A gas`／`V gas` 的血氣欄位比對，Lactic acid 對應 `LA`；有結果時不再另列 `Others pending`，明確指定動脈／靜脈的醫囑仍分開比對。
+- 糞便潛血（Occult blood／Stool O.B.）的 pending 放在 `Stool`。常常隔天才留到檢體，所以同日沒有報告時，隔天的 O.B. 結果可以完成前一天唯一一筆還沒出的醫囑；一份報告只抵一筆，更早的醫囑不會被較晚的結果解除。醫囑名稱只寫 `P`（例如 `P (STAT)`）視為磷，對應 `Renal & e-` 的 P。
 - 「Pathogen」整批插入包含近 7 天培養與已載入的病原檢驗；只有 PCR、快篩、染色而沒有培養時也能使用。痰培養簡稱統一為 `Sp/C`，補入時仍能辨認舊的 `Spu/C`，避免重複。
 - 每個區塊標題左邊有展開／收合鈕。預設收合：自上一篇以來、護理紀錄、護理交班。Lab 的「項目」可以勾選要顯示哪些檢驗項目（預設只隱藏 eGFR），隱藏的項目插入時也不會帶入。這兩項設定記在瀏覽器的 localStorage（`pnw.fold`、`pnw.labHide`），所有病人共用。
 - 每一列都有「插入」鈕，把文字插到 HIS 原生文字框的游標處。「補進 [Lab]」會把 note 裡 [Lab] 最後日期之後的新結果接到既有表格下面（用 `PNLab.process`）；只會加行，不會刪掉或改寫原有內容。
@@ -37,7 +38,7 @@
 - 院外測試：`prototype/his-mock/InsertProgressNoteContent.aspx/` 是模擬病程頁（假資料），用專案根目錄起一個靜態伺服器後開
   `http://localhost:8770/prototype/his-mock/InsertProgressNoteContent.aspx/?SESSION=MOCK&AccountIDSE=26T00000000&PersonID=A000000000`。
   網址加 `&kind=progress` 是結構化 Progress note 的版面，加 `&kind=none` 是還沒開任何 note。
-- 狀態（2026-11-17）：v0.6.0 在 HIS 病程頁實測過資料載入、時間軸（含自訂天數、點選時間點）、版面嵌入（Free note 與 Weekly Summary 表單）、收合、Lab 天數與翻頁、護理交班、抗生素查整個住院期間、多天生命徵象與病人比對。v0.6.1 已在 Ego-lite 的兩個 HIS 病程案例唯讀確認：Acinetobacter 名稱變體移出 Lab、肺炎 PCR 摘要保留陽性病原、Sp/C 顯示，以及 A gas／V gas 與 LA 的結果比對不再誤列 pending；前後全部 145 個 textarea 內容均相同。Pancreas 因這兩個案例沒有相關結果，仍只以假資料驗證。Ego-lite 已安裝 v0.6.1，重新讀回的腳本與建置檔完全相同。所有會寫進文字框的動作仍只在模擬頁測過，真實 HIS 上不操作。
+- 狀態（2026-11-17）：v0.6.0 在 HIS 病程頁實測過資料載入、時間軸（含自訂天數、點選時間點）、版面嵌入（Free note 與 Weekly Summary 表單）、收合、Lab 天數與翻頁、護理交班、抗生素查整個住院期間、多天生命徵象與病人比對。v0.6.1 已在 Ego-lite 的兩個 HIS 病程案例唯讀確認：Acinetobacter 名稱變體移出 Lab、肺炎 PCR 摘要保留陽性病原、Sp/C 顯示，以及 A gas／V gas 與 LA 的結果比對不再誤列 pending；前後全部 145 個 textarea 內容均相同。Pancreas 因這兩個案例沒有相關結果，仍只以假資料驗證。Ego-lite 已安裝 v0.6.1，重新讀回的腳本與建置檔完全相同。v0.6.2 在同兩類 HIS 案例注入 console 版唯讀確認：隔日才留檢體的 stool O.B. 與 `P (STAT)` 不再出現 pending，前後 145 個 textarea 內容相同；Ego-lite 的 Tampermonkey 仍是 v0.6.1。所有會寫進文字框的動作仍只在模擬頁測過，真實 HIS 上不操作。
 - 安裝與更新：專案根目錄起靜態伺服器後，在裝有 Tampermonkey 的瀏覽器開 `http://localhost:8770/dist/pn-workspace.user.js`，Tampermonkey 會跳出安裝／更新頁。
 - `prototype/index.html` 是最初的版面原型（純假資料）。
 

@@ -98,7 +98,7 @@ const PNLab = (() => {
     [/CRP/i, 'Hemogram', ['CRP']], [/Procalcitonin/i, 'Hemogram', ['PCT']],
     [/^UN\b|\bBUN\b|Urea/i, 'Renal & e-', ['BUN']], [/Creatinine/i, 'Renal & e-', ['CRE']], [/Uric/i, 'Renal & e-', ['UA']],
     [/Sodium|\bNa\b/i, 'Renal & e-', ['Na']], [/Potassium|\bK\b/, 'Renal & e-', ['K']], [/Chloride|\bCl\b/, 'Renal & e-', ['Cl']],
-    [/Calcium|\bCa\b/, 'Renal & e-', ['Ca']], [/Phosph/i, 'Renal & e-', ['P']], [/Magnesium|\bMg\b/, 'Renal & e-', ['Mg']],
+    [/Calcium|\bCa\b/, 'Renal & e-', ['Ca']], [/Phosph|^P(?=\s*(?:\(|$))/i, 'Renal & e-', ['P']], [/Magnesium|\bMg\b/, 'Renal & e-', ['Mg']],
     [/\bALT\b|GPT/i, 'Liver', ['ALT']], [/\bAST\b|GOT/i, 'Liver', ['AST']], [/Bilirubin-T|T-Bil|\bBIL\.?\s*T\b/i, 'Liver', ['T-Bil']],
     [/Bilirubin-D|D-Bil|\bBIL\.?\s*D\b/i, 'Liver', ['D-Bil']], [/Albumin/i, 'Liver', ['Alb']], [/\bALP\b|Alkaline/i, 'Liver', ['ALP']], [/GGT/i, 'Liver', ['GGT']],
     [/\bPT\b|Prothrombin/i, 'Coagulation', ['PT', 'INR']], [/a\.?P\.?T\.?T|\bPTT\b/i, 'Coagulation', ['aPTT']],
@@ -213,6 +213,24 @@ const PNLab = (() => {
     // 培養醫囑被「修改」到比較晚的日期時（例如隔天才留到痰），原本那天不算 pending
     const movedTo = new Map();
     for (const o of orderRows || []) if (/修改/.test(o.act) && o.startDay) { const k = norm(o.name); movedTo.set(k, Math.max(movedTo.get(k) || 0, o.startDay)); }
+    // 糞便潛血常隔天才留到檢體。先配同日醫囑；隔日結果只配給唯一尚未完成的前日醫囑，不能一份報告抵兩筆。
+    const isStoolOB = (o) => /檢驗/.test(o.type) && /Occult\s*blood|(?:stool|fecal|faecal).*\bO\.?\s*B\b/i.test(o.name) && !/urine|Specimen:\s*URI/i.test(o.name);
+    const orderKey = (o) => o.startDay + '|' + norm(o.name);
+    const obCol = (c) => /^(?:O\.?B\.?|Occult\s*blood)$/i.test(c);
+    const stool = groups.find((g) => g.name === 'Stool');
+    const obReports = (stool ? stool.rows : []).filter((r) => (stool.cols || []).some((c) => obCol(c) && r.vals[c] && r.vals[c] !== EMPTY && !/^pending$/i.test(r.vals[c]))).map((r) => ({ day: dayNum(dayOf(r.label)) }));
+    const obOrders = [...new Map((orderRows || []).filter((o) => isStoolOB(o) && o.startDay && o.startDay <= todayNum && !/刪除/.test(o.act) && !delKeys.has(orderKey(o)) && !(/新增/.test(o.act) && (movedTo.get(norm(o.name)) || 0) > o.startDay)).map((o) => [orderKey(o), o])).values()];
+    const obDone = new Set(), usedOB = new Set();
+    for (const o of obOrders) {
+      const i = obReports.findIndex((r, i) => r.day === o.startDay && !usedOB.has(i));
+      if (i >= 0) { usedOB.add(i); obDone.add(orderKey(o)); }
+    }
+    const nextDay = (n) => { const d = new Date(2000, Math.floor(n / 100) - 1, n % 100 + 1); return (d.getMonth() + 1) * 100 + d.getDate(); };
+    obReports.forEach((r, i) => {
+      if (usedOB.has(i)) return;
+      const candidates = obOrders.filter((o) => !obDone.has(orderKey(o)) && nextDay(o.startDay) === r.day);
+      if (candidates.length === 1) { usedOB.add(i); obDone.add(orderKey(candidates[0])); }
+    });
     for (const o of orderRows || []) {
       if (/刪除/.test(o.act) || !o.startDay || o.startDay > todayNum || delKeys.has(o.startDay + '|' + norm(o.name))) continue;
       const ord = (n) => Math.floor(n / 100) * 31 + n % 100; if (ord(o.startDay) < ord(todayNum) - 10) continue;
@@ -229,6 +247,11 @@ const PNLab = (() => {
       } else if (/檢驗/.test(o.type) && !/ABO|Rh blood|Antibody|Blood Type|備血|cross|\bE[CK]G\b|Specimen:\s*ECG/i.test(o.name) && (o.startDay > cutoff || o.startDay === todayNum)) {
         // 心電圖在醫囑清單裡的類別也是「檢驗」，但它不是 Lab，上面那行已排除
         if (/Urinalysis|\bU\/A\b|Specimen:\s*URI|urine/i.test(o.name)) { addLabPend('Urine', o, [], ''); continue; }
+        if (isStoolOB(o)) {
+          if (/新增/.test(o.act) && (movedTo.get(norm(o.name)) || 0) > o.startDay) continue;
+          if (!obDone.has(orderKey(o))) addLabPend('Stool', o, [(stool && stool.cols.find(obCol)) || 'OB'], 'OB');
+          continue;
+        }
         if (drugOf(o.name)) { addLabPend('Drug', o, [drugOf(o.name)], drugOf(o.name)); continue; }
         // 醫囑叫 Blood gas／Lactic acid，報告欄位則是 A gas／V gas 與 LA。
         const gasOrder = /Blood\s*gas|\b[AV]\s*gas\b|\b[AV]BG\b/i.test(o.name), laOrder = /Lactic\s*acid|Lactate|\bLA\b/i.test(o.name);

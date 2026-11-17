@@ -256,7 +256,7 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
   /* ---------- 影像與病原：各自一段（[Image]、[Pathogen]），一筆一行「<MM/DD> 名稱: 結果」 ---------- */
   const pad2 = (n) => String(n).padStart(2, '0');
   const mdOf = (ms) => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`; };
-  const normTitle = (s) => String(s).replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
+  const normTitle = (s) => String(s).replace(/^Spu\/C\b/i, 'Sp/C').replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
   const DATED = /^\s*[\[<](\d{1,2})\/(\d{1,2})[\]>]\s*(.*)$/;      // 新寫法 <11/10>；也認得舊寫法 [11/10]
   const dayKey = (md) => { const m = String(md).match(/(\d{1,2})\/(\d{1,2})/); return m ? +m[1] * 100 + +m[2] : -1; };
   const numOf = (ms) => { const d = new Date(ms); return (d.getMonth() + 1) * 100 + d.getDate(); };
@@ -527,5 +527,5 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
     document.documentElement.classList.remove('pnw-on', 'pnw-nolist');
     document.documentElement.style.removeProperty('--pnw-w');
   };
-  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.6.0' };
+  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.6.1' };
 })();

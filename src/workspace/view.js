@@ -47,7 +47,8 @@ const PNW_VIEW = (() => {
     const u = String(s || '').toUpperCase();
     if (/BLOOD/.test(u)) return 'B/C';
     if (/URINE/.test(u)) return 'U/C';
-    if (/SPUTUM|BRONCH|BAL|TRACHEAL|ENDOTRACH/.test(u)) return 'Sputum';
+    if (/SPUTUM/.test(u)) return 'Sp/C';
+    if (/BRONCH|BAL|TRACHEAL|ENDOTRACH/.test(u)) return 'Sputum';
     if (/PLEURAL/.test(u)) return 'Pleural';
     if (/STOOL/.test(u)) return 'Stool';
     if (/ASCIT/.test(u)) return 'Ascites';
@@ -171,10 +172,13 @@ const PNW_VIEW = (() => {
       }
       const PL = window.PNLab || {};
       const isDrug = (n) => !!(PL.drugOf && PL.drugOf(n));
+      const isPancreas = (n) => !!(PL.pancreasOf && PL.pancreasOf(n));
       const restItems = s.blood.items.filter((it) => !used.has(it.name) && !CX_ITEM.test(it.name) && !(PL.isPathogenCol && PL.isPathogenCol(it.name)));
+      const pancreasRows = restItems.filter((it) => isPancreas(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
+      if (pancreasRows.length) groups.push({ name: 'Pancreas', rows: pancreasRows });
       const drugRows = restItems.filter((it) => isDrug(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
       if (drugRows.length) groups.push({ name: 'Drug', rows: drugRows });
-      const rest = restItems.filter((it) => !isDrug(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
+      const rest = restItems.filter((it) => !isDrug(it.name) && !isPancreas(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
       if (rest.length) groups.push({ name: 'Others', rows: rest });
       for (const { name, set } of sets.slice(1)) {
         const rows = set.items.map((it) => rowOf(set, it)).filter(Boolean);
@@ -565,6 +569,12 @@ const PNW_VIEW = (() => {
       const pending = C.filter((c) => c.status === 'pending' || (c.pend.length && c.status !== 'grown'));
       const grown = C.filter((c) => c.status === 'grown');
       const quiet = C.filter((c) => c.status === 'ng' && !c.pend.length);
+      // 整批 Pathogen 和下方「病原檢驗」共用同一份結果，沒有培養時也能插入。
+      let ptests = [];
+      try {
+        const d = new Date(now());
+        if (window.PNLab && M.labs && M.labs.summary) ptests = window.PNLab.process(M.labs.summary.text || '', '', (M.orders && M.orders.rows) || [], [], (d.getMonth() + 1) * 100 + d.getDate()).pathogen.filter((e) => !/\/C\b|^Cul$/.test(e.label));
+      } catch (e) { /* 這一小段出錯不影響其他內容 */ }
       const label = (c) => esc(c.short);
       const cxNote = (c) => {
         const day = md(c.t);
@@ -575,7 +585,11 @@ const PNW_VIEW = (() => {
       };
       const ISO = isolates();
       const live = (M.abx || []).filter((a) => a.end == null);
-      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length ? insBtn(() => C.filter((c) => c.t > now() - 7 * DAY).sort((a, b) => a.t - b.t).map(cxNote).join('\n'), '[Pathogen] 近 7 天的培養', 'Pathogen') : ''}`);
+      const pathogenText = () => [
+        ...C.filter((c) => c.t > now() - 7 * DAY).map((c) => ({ day: md(c.t), text: cxNote(c) })),
+        ...ptests.map((e) => ({ day: e.md, text: `<${e.md}> ${e.label}: ${e.res}` })),
+      ].sort((a, b) => a.day.localeCompare(b.day)).map((e) => e.text).join('\n');
+      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length || ptests.length ? insBtn(pathogenText, '[Pathogen] 近 7 天的培養與已載入的病原檢驗', 'Pathogen') : ''}`);
       h += stateNote('labs', '培養報告') + stateNote('pending', '未發送檢驗進度');
       if (live.length && ISO.length) {
         h += '<div class="cover">';
@@ -622,11 +636,6 @@ const PNW_VIEW = (() => {
       const others = (M.pending || []).map((p) => ({ p, items: p.items.filter((x) => !CX_ITEM.test(x.name)) })).filter((x) => x.items.length);
       if (others.length) h += `<div class="sub-h">其他未發檢驗<span>${others.length} 份檢體</span></div><ul>${others.map(({ p, items }) => `<li class="row"><span class="tag pending">未發</span><span class="main">${esc(items.map((x) => x.name).join('、'))} <span class="dose">${esc(p.spec)}</span></span><span class="sub">${fin(p.t) ? md(p.t) + ' ' + hm(p.t) : ''}</span>${insBtn(`${items.map((x) => x.name).join(', ')}: pending`, items[0].name)}</li>`).join('')}</ul>`;
       // 病原檢驗：Multiplex PCR、流感與新冠快篩、抹片染色。不是培養，但寫 note 時同樣放 [Pathogen]
-      let ptests = [];
-      try {
-        const d = new Date(now());
-        if (window.PNLab && M.labs && M.labs.summary) ptests = window.PNLab.process(M.labs.summary.text || '', '', (M.orders && M.orders.rows) || [], [], (d.getMonth() + 1) * 100 + d.getDate()).pathogen.filter((e) => !/\/C$|^Cul$/.test(e.label));
-      } catch (e) { /* 這一小段出錯不影響其他內容 */ }
       if (ptests.length) {
         h += `<div class="sub-h">病原檢驗<span>PCR、快篩、染色 · ${ptests.length} 筆</span></div><ul>`;
         h += ptests.slice().reverse().map((e) => {

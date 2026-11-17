@@ -103,6 +103,7 @@ const PNLab = (() => {
     [/Bilirubin-D|D-Bil|\bBIL\.?\s*D\b/i, 'Liver', ['D-Bil']], [/Albumin/i, 'Liver', ['Alb']], [/\bALP\b|Alkaline/i, 'Liver', ['ALP']], [/GGT/i, 'Liver', ['GGT']],
     [/\bPT\b|Prothrombin/i, 'Coagulation', ['PT', 'INR']], [/a\.?P\.?T\.?T|\bPTT\b/i, 'Coagulation', ['aPTT']],
     [/NT-?pro/i, 'Cardiac', ['NT-proBNP']], [/CK-MB/i, 'Cardiac', ['CK-MB']], [/\bCK\b/, 'Cardiac', ['CK']], [/Troponin/i, 'Cardiac', ['TnT']],
+    [/Amylase|\bAMY\b/i, 'Pancreas', ['AMY']], [/Lipase|\bLip\b/i, 'Pancreas', ['Lip']],
   ];
   // 藥物濃度（TDM）：在 [Lab] 裡自成一組「#. Drug」（使用者 2026-11-17）
   const DRUGS = [
@@ -111,16 +112,19 @@ const PNLab = (() => {
     [/phenytoin/i, 'Phenytoin'], [/valpro/i, 'Valproic acid'], [/carbamazepine/i, 'Carbamazepine'], [/phenobarb/i, 'Phenobarbital'], [/theophylline/i, 'Theophylline'], [/lithium/i, 'Lithium'], [/methotrexate/i, 'Methotrexate'],
   ];
   const drugOf = (s) => { const d = DRUGS.find(([re]) => re.test(String(s))); return d ? d[1] : ''; };
+  const pancreasOf = (s) => /^(?:AMY|Amylase)$/i.test(String(s).trim()) ? 'AMY' : /^(?:Lip|Lipase)$/i.test(String(s).trim()) ? 'Lip' : '';
   // 病原檢驗但檢驗整理把它排成表格欄位的：Multiplex PCR panel 的各個目標、抹片染色。這些屬於 [Pathogen]，不留在 Lab 表格裡
   const PANEL_COL = /^(?:Staphylococcus aureus|Streptococcus (?:pneumoniae|pyogenes|agalactiae)|Haemophilus influenzae|Moraxella catarrhalis|Klebsiella (?:pneumoniae(?: group)?|aerogenes|oxytoca)|Pseudomonas aeruginosa|Serratia marcescens|E\. ?coli|Escherichia coli|Acinetobacter calcoaceticus-baumannii complex|Entero?bacter cloacae complex|Proteus spp\.?|Mycoplasma pneumoniae|Legionella pne\w+|Chlamydia pneumoniae|Bordetella \w+|Influenzae? [AB]\b.*|Coronavirus.*|Respiratory Syncytial virus|Parainfluenzae? Virus.*|Adenovirus|Human Rhinovirus\/Enterovirus|Human Metapneumovirus|MERS.*)$/i;
   const PANEL_BACT = /Staphylococcus|Streptococcus|Haemophilus|Moraxella|Klebsiella|Pseudomonas|Serratia|coli|Acinetobacter|bacter cloacae|Proteus|Legionella/i;
   const STAIN_COL = /^(?:AF Stain|Acid fast stain|Gram'?s? stain|KOH|India ink)/i;
-  const isPathogenCol = (c) => PANEL_COL.test(String(c).trim()) || STAIN_COL.test(String(c).trim());
+  // HIS 來源也出現 calcoacceticus（多一個 c）；連字號／空白、單號附加的 #1 同樣不改變分類。
+  const panelCol = (c) => PANEL_COL.test(String(c).trim()) || /^Acinetobacter(?:\s+(?:(?:calcoaceticus|calcoacceticus)[-–\s]+)?baumannii)?(?:\s+complex)?(?:\s*#\d+)?$/i.test(String(c).trim());
+  const isPathogenCol = (c) => panelCol(c) || STAIN_COL.test(String(c).trim());
   const NEG = /^(?:neg|negative|not detected|undetected|-)$/i;
   // 痰的檢體代碼是 SPU／SP1，後面常直接接「SITE:」，所以 pus 要用整個字比對，不然「SPUSITE」會被當成傷口
   const cultureType = (s) => (/multiplex|pcr test panel|pneumonia pcr/i.test(s) ? (/pneumonia/i.test(s) ? 'Pneumonia PCR' : 'Multiplex PCR')
     : /influenza/i.test(s) ? 'Influenza A+B' : /sars-cov|covid/i.test(s) ? 'SARS-CoV-2' : /acid fast|\bAFS\b|AF stain/i.test(s) ? 'AFS'
-    : /blood|\bB\/C|^B2/i.test(s) ? 'B/C' : /urine|\bU\/C|^B3/i.test(s) ? 'U/C' : /sputum|\bSpu?\/C|\bS\/C|Specimen:\s*SP[U1]|respiratory specimen/i.test(s) ? 'Spu/C'
+    : /blood|\bB\/C|^B2/i.test(s) ? 'B/C' : /urine|\bU\/C|^B3/i.test(s) ? 'U/C' : /sputum|\bSpu?\/C|\bS\/C|Specimen:\s*SP[U1]|respiratory specimen/i.test(s) ? 'Sp/C'
     : /cvc|cvp|picc|catheter tip|Cath/i.test(s) ? 'Tip/C' : /wound|\bpus\b|W\/C/i.test(s) ? 'W/C' : /stool/i.test(s) ? 'Stool/C' : 'Cul');
 
   // labText：檢驗整理表格＋緊湊輸出；note：上一篇 note；orderRows：醫囑簽收（全部）；pacsAll：已出報告影像
@@ -143,19 +147,27 @@ const PNLab = (() => {
     }
     // 藥物濃度：不管檢驗整理把它放在哪一組（多半是 Others），集中成「Drug」，排在 Others 前面
     const drug = { name: 'Drug', cols: [], rows: [] };
+    const pancreas = { name: 'Pancreas', cols: [], rows: [] };
     // 病原檢驗的欄位：每個日期整理成一行（有驗出的列出來，全陰性寫 -），從 Lab 表格拿掉
     const colEntries = [];
     for (const g of groups) {
       if (g.culture) continue;
-      const dCols = g.cols.filter((c) => drugOf(c)), pCols = g.cols.filter((c) => PANEL_COL.test(c.trim())), sCols = g.cols.filter((c) => STAIN_COL.test(c.trim()));
-      if (!dCols.length && !pCols.length && !sCols.length) continue;
+      const dCols = g.cols.filter((c) => drugOf(c)), pCols = g.cols.filter(panelCol), sCols = g.cols.filter((c) => STAIN_COL.test(c.trim()));
+      // 只搬血液生化的 Others；體液 AMY 仍留在原本檢體那組。
+      const aCols = g.name === 'Others' ? g.cols.filter(pancreasOf) : [];
+      if (!dCols.length && !pCols.length && !sCols.length && !aCols.length) continue;
       const has = (r, c) => r.vals[c] && r.vals[c] !== EMPTY;
       for (const c of dCols) if (!drug.cols.includes(c)) drug.cols.push(c);
+      for (const c of aCols) if (!pancreas.cols.includes(pancreasOf(c))) pancreas.cols.push(pancreasOf(c));
       for (const r of g.rows) {
         const day = dayNum(dayOf(r.label)), md = dayOf(r.label);
         if (dCols.some((c) => has(r, c))) {
           let ex = drug.rows.find((x) => x.label === r.label); if (!ex) { ex = { label: r.label, vals: {} }; drug.rows.push(ex); }
           for (const c of dCols) if (has(r, c)) ex.vals[c] = r.vals[c];
+        }
+        if (aCols.some((c) => has(r, c))) {
+          let ex = pancreas.rows.find((x) => x.label === r.label); if (!ex) { ex = { label: r.label, vals: {} }; pancreas.rows.push(ex); }
+          for (const c of aCols) if (has(r, c)) ex.vals[pancreasOf(c)] = r.vals[c];
         }
         const pv = pCols.filter((c) => has(r, c));
         if (pv.length) {
@@ -163,11 +175,16 @@ const PNLab = (() => {
           colEntries.push({ day, md, label: pv.some((c) => PANEL_BACT.test(c)) ? 'Pneumonia PCR' : 'Multiplex PCR', res: hit.join('; ') || '-' });
         }
         for (const c of sCols) if (has(r, c)) colEntries.push({ day, md, label: /AF|acid/i.test(c) ? 'AFS' : c.replace(/\s*#\d+\s*$/, '').trim(), res: r.vals[c].trim() });
-        for (const c of [...dCols, ...pCols, ...sCols]) delete r.vals[c];
+        for (const c of [...dCols, ...pCols, ...sCols, ...aCols]) delete r.vals[c];
       }
-      g.cols = g.cols.filter((c) => !dCols.includes(c) && !pCols.includes(c) && !sCols.includes(c));
+      g.cols = g.cols.filter((c) => !dCols.includes(c) && !pCols.includes(c) && !sCols.includes(c) && !aCols.includes(c));
     }
     if (drug.cols.length) { const at = groups.findIndex((g) => g.name === 'Others' || g.culture); groups.splice(at < 0 ? groups.length : at, 0, drug); }
+    if (pancreas.cols.length) {
+      const existing = groups.find((g) => g.name === 'Pancreas');
+      if (existing) { existing.cols = [...new Set([...existing.cols, ...pancreas.cols])]; existing.rows.push(...pancreas.rows); }
+      else { const at = groups.findIndex((g) => g.name === 'Drug' || g.name === 'Others' || g.culture); groups.splice(at < 0 ? groups.length : at, 0, pancreas); }
+    }
     // 培養：新的採檢日，或上一篇寫 pending 的那筆
     const cul = groups.find((g) => g.culture);
     const notePending = new Set();
@@ -176,7 +193,7 @@ const PNLab = (() => {
       const m = l.match(/\[?(\d{1,2})\/?(\d{2})\]?/); if (m) notePending.add(+m[1] * 100 + +m[2] + '|' + cultureType(l));
     }
     const culEntries = [];
-    if (cul) for (const l of cul.lines) { const m = l.match(/^\[(\d{1,2})\/(\d{1,2})\]\s*(.+?):\s*(.*)$/); if (m) culEntries.push({ day: +m[1] * 100 + +m[2], md: `${m[1]}/${m[2]}`, label: m[3], type: cultureType(m[3]), res: m[4], line: l }); }
+    if (cul) for (const l of cul.lines) { const m = l.match(/^\[(\d{1,2})\/(\d{1,2})\]\s*(.+?):\s*(.*)$/); if (m) culEntries.push({ day: +m[1] * 100 + +m[2], md: `${m[1]}/${m[2]}`, label: m[3].replace(/^Spu\/C\b/i, 'Sp/C'), type: cultureType(m[3]), res: m[4], line: l }); }
     for (const e of colEntries) culEntries.push({ ...e, type: cultureType(e.label) });
     const newCul = culEntries.filter((e) => e.day > cutoff || notePending.has(e.day + '|' + e.type));
     // pending：醫囑有開、報告還沒出；抽血依項目放回各檢驗類別，培養與病原檢驗放 [Pathogen]，影像放 [Image]
@@ -213,6 +230,19 @@ const PNLab = (() => {
         // 心電圖在醫囑清單裡的類別也是「檢驗」，但它不是 Lab，上面那行已排除
         if (/Urinalysis|\bU\/A\b|Specimen:\s*URI|urine/i.test(o.name)) { addLabPend('Urine', o, [], ''); continue; }
         if (drugOf(o.name)) { addLabPend('Drug', o, [drugOf(o.name)], drugOf(o.name)); continue; }
+        // 醫囑叫 Blood gas／Lactic acid，報告欄位則是 A gas／V gas 與 LA。
+        const gasOrder = /Blood\s*gas|\b[AV]\s*gas\b|\b[AV]BG\b/i.test(o.name), laOrder = /Lactic\s*acid|Lactate|\bLA\b/i.test(o.name);
+        if (gasOrder || laOrder) {
+          const kind = /\bABG\b|\bA\s*gas\b|arterial/i.test(o.name) ? 'A gas' : /\bVBG\b|\bV\s*gas\b|venous/i.test(o.name) ? 'V gas' : '';
+          const candidates = groups.filter((g) => kind ? g.name === kind : /^(?:[AV] gas|Gas)$/.test(g.name));
+          const cols = gasOrder ? ['pH', 'PCO2', 'HCO3'] : ['LA'];
+          const hasResult = (g, keys) => g.rows.some((r) => dayNum(dayOf(r.label)) === o.startDay && keys.some((c) => r.vals[c] && r.vals[c] !== EMPTY && !/^pending$/i.test(r.vals[c])));
+          if (!candidates.some((g) => hasResult(g, cols))) {
+            const target = kind || (candidates.find((g) => hasResult(g, ['pH', 'PCO2', 'HCO3', 'LA'])) || {}).name || (gasOrder ? 'Gas' : 'V gas');
+            addLabPend(target, o, cols, gasOrder ? 'Blood gas' : 'LA');
+          }
+          continue;
+        }
         const hits = LAB_MAP.filter(([re]) => re.test(o.name));
         if (hits.length) for (const [, grp, cols] of hits) addLabPend(grp, o, cols, '');
         else addLabPend('Others', o, [], o.name.replace(/特殊醫囑.*$/, '').replace(/\(.*$/, '').trim());
@@ -256,7 +286,7 @@ const PNLab = (() => {
     // text：整份（給批次輸出）；lab／pathogen／image：分開的三部分（給病程頁工作畫面各自併進對應的段落）
     return { text: parts.filter(Boolean).join('\n') || '（上一篇之後沒有新的檢驗結果）', cutoff, lab, pathogen, image };
   }
-  return { parse, process, lastNoteLabDay, cultureType, drugOf, isPathogenCol };
+  return { parse, process, lastNoteLabDay, cultureType, drugOf, pancreasOf, isPathogenCol };
 })();
 if (typeof module !== 'undefined') module.exports = PNLab; else window.PNLab = PNLab;
 
@@ -3228,7 +3258,8 @@ const PNW_VIEW = (() => {
     const u = String(s || '').toUpperCase();
     if (/BLOOD/.test(u)) return 'B/C';
     if (/URINE/.test(u)) return 'U/C';
-    if (/SPUTUM|BRONCH|BAL|TRACHEAL|ENDOTRACH/.test(u)) return 'Sputum';
+    if (/SPUTUM/.test(u)) return 'Sp/C';
+    if (/BRONCH|BAL|TRACHEAL|ENDOTRACH/.test(u)) return 'Sputum';
     if (/PLEURAL/.test(u)) return 'Pleural';
     if (/STOOL/.test(u)) return 'Stool';
     if (/ASCIT/.test(u)) return 'Ascites';
@@ -3352,10 +3383,13 @@ const PNW_VIEW = (() => {
       }
       const PL = window.PNLab || {};
       const isDrug = (n) => !!(PL.drugOf && PL.drugOf(n));
+      const isPancreas = (n) => !!(PL.pancreasOf && PL.pancreasOf(n));
       const restItems = s.blood.items.filter((it) => !used.has(it.name) && !CX_ITEM.test(it.name) && !(PL.isPathogenCol && PL.isPathogenCol(it.name)));
+      const pancreasRows = restItems.filter((it) => isPancreas(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
+      if (pancreasRows.length) groups.push({ name: 'Pancreas', rows: pancreasRows });
       const drugRows = restItems.filter((it) => isDrug(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
       if (drugRows.length) groups.push({ name: 'Drug', rows: drugRows });
-      const rest = restItems.filter((it) => !isDrug(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
+      const rest = restItems.filter((it) => !isDrug(it.name) && !isPancreas(it.name)).map((it) => rowOf(s.blood, it)).filter(Boolean);
       if (rest.length) groups.push({ name: 'Others', rows: rest });
       for (const { name, set } of sets.slice(1)) {
         const rows = set.items.map((it) => rowOf(set, it)).filter(Boolean);
@@ -3746,6 +3780,12 @@ const PNW_VIEW = (() => {
       const pending = C.filter((c) => c.status === 'pending' || (c.pend.length && c.status !== 'grown'));
       const grown = C.filter((c) => c.status === 'grown');
       const quiet = C.filter((c) => c.status === 'ng' && !c.pend.length);
+      // 整批 Pathogen 和下方「病原檢驗」共用同一份結果，沒有培養時也能插入。
+      let ptests = [];
+      try {
+        const d = new Date(now());
+        if (window.PNLab && M.labs && M.labs.summary) ptests = window.PNLab.process(M.labs.summary.text || '', '', (M.orders && M.orders.rows) || [], [], (d.getMonth() + 1) * 100 + d.getDate()).pathogen.filter((e) => !/\/C\b|^Cul$/.test(e.label));
+      } catch (e) { /* 這一小段出錯不影響其他內容 */ }
       const label = (c) => esc(c.short);
       const cxNote = (c) => {
         const day = md(c.t);
@@ -3756,7 +3796,11 @@ const PNW_VIEW = (() => {
       };
       const ISO = isolates();
       const live = (M.abx || []).filter((a) => a.end == null);
-      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length ? insBtn(() => C.filter((c) => c.t > now() - 7 * DAY).sort((a, b) => a.t - b.t).map(cxNote).join('\n'), '[Pathogen] 近 7 天的培養', 'Pathogen') : ''}`);
+      const pathogenText = () => [
+        ...C.filter((c) => c.t > now() - 7 * DAY).map((c) => ({ day: md(c.t), text: cxNote(c) })),
+        ...ptests.map((e) => ({ day: e.md, text: `<${e.md}> ${e.label}: ${e.res}` })),
+      ].sort((a, b) => a.day.localeCompare(b.day)).map((e) => e.text).join('\n');
+      let h = secOpen('cx', '培養與藥敏', `<span class="tag pending">${pending.length} 份未發</span><span class="tag grown">${grown.length} 份有長</span><span class="sp"></span>${C.length || ptests.length ? insBtn(pathogenText, '[Pathogen] 近 7 天的培養與已載入的病原檢驗', 'Pathogen') : ''}`);
       h += stateNote('labs', '培養報告') + stateNote('pending', '未發送檢驗進度');
       if (live.length && ISO.length) {
         h += '<div class="cover">';
@@ -3803,11 +3847,6 @@ const PNW_VIEW = (() => {
       const others = (M.pending || []).map((p) => ({ p, items: p.items.filter((x) => !CX_ITEM.test(x.name)) })).filter((x) => x.items.length);
       if (others.length) h += `<div class="sub-h">其他未發檢驗<span>${others.length} 份檢體</span></div><ul>${others.map(({ p, items }) => `<li class="row"><span class="tag pending">未發</span><span class="main">${esc(items.map((x) => x.name).join('、'))} <span class="dose">${esc(p.spec)}</span></span><span class="sub">${fin(p.t) ? md(p.t) + ' ' + hm(p.t) : ''}</span>${insBtn(`${items.map((x) => x.name).join(', ')}: pending`, items[0].name)}</li>`).join('')}</ul>`;
       // 病原檢驗：Multiplex PCR、流感與新冠快篩、抹片染色。不是培養，但寫 note 時同樣放 [Pathogen]
-      let ptests = [];
-      try {
-        const d = new Date(now());
-        if (window.PNLab && M.labs && M.labs.summary) ptests = window.PNLab.process(M.labs.summary.text || '', '', (M.orders && M.orders.rows) || [], [], (d.getMonth() + 1) * 100 + d.getDate()).pathogen.filter((e) => !/\/C$|^Cul$/.test(e.label));
-      } catch (e) { /* 這一小段出錯不影響其他內容 */ }
       if (ptests.length) {
         h += `<div class="sub-h">病原檢驗<span>PCR、快篩、染色 · ${ptests.length} 筆</span></div><ul>`;
         h += ptests.slice().reverse().map((e) => {
@@ -4299,7 +4338,7 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
   /* ---------- 影像與病原：各自一段（[Image]、[Pathogen]），一筆一行「<MM/DD> 名稱: 結果」 ---------- */
   const pad2 = (n) => String(n).padStart(2, '0');
   const mdOf = (ms) => { const d = new Date(ms); return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`; };
-  const normTitle = (s) => String(s).replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
+  const normTitle = (s) => String(s).replace(/^Spu\/C\b/i, 'Sp/C').replace(/\(Indication.*$/i, '').replace(/\(入院檢查\)/g, '').replace(/\s+/g, '').toLowerCase();
   const DATED = /^\s*[\[<](\d{1,2})\/(\d{1,2})[\]>]\s*(.*)$/;      // 新寫法 <11/10>；也認得舊寫法 [11/10]
   const dayKey = (md) => { const m = String(md).match(/(\d{1,2})\/(\d{1,2})/); return m ? +m[1] * 100 + +m[2] : -1; };
   const numOf = (ms) => { const d = new Date(ms); return (d.getMonth() + 1) * 100 + d.getDate(); };
@@ -4570,7 +4609,7 @@ html.pnw-on #${ED} { height: calc(100vh - 150px) !important; min-height: 420px !
     document.documentElement.classList.remove('pnw-on', 'pnw-nolist');
     document.documentElement.style.removeProperty('--pnw-w');
   };
-  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.6.0' };
+  window.__pnw = { M, destroy, src: () => S, imagePreview: () => imageEntries(), pathogenPreview: () => pathogenEntries(), reload: load, render: () => view.render(), debug: () => view.debug(), nameOf: fieldName, fields: () => fields().map((t) => ({ id: t.id, name: fieldName(t), ro: t.readOnly || t.disabled })), version: '0.6.1' };
 })();
 
 })();
